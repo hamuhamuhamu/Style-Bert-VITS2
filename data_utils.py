@@ -162,6 +162,10 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         return spec, audio_norm
 
     def get_text(self, text, word2ph, phone, tone, language_str, wav_path):
+        # 変更を加える前にコピーを作成しておく
+        phone = phone.copy()
+        tone = tone.copy()
+        word2ph = word2ph.copy()
         # g2p 処理では対応しているが現行モデルでは対応していない特定音素を、対応する音素にフォールバックする
         # 変更は引数で与えられた phone / tone / word2ph に in-place で適用される
         convert_unsupported_phones_for_current_model(
