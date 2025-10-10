@@ -86,7 +86,7 @@ class DurationDiscriminator(nn.Module):  # vits2
         x = torch.detach(x)
         if g is not None:
             g = torch.detach(g)
-            x.add_(self.cond(g))
+            x = commons.residual_add(x, self.cond(g))
         x = self.conv_1(x * x_mask)
         x.relu_()
         x = self.norm_1(x)
@@ -310,7 +310,7 @@ class StochasticDurationPredictor(nn.Module):
         x = self.pre(x)
         if g is not None:
             g = torch.detach(g)
-            x.add_(self.cond(g))
+            x = commons.residual_add(x, self.cond(g))
         x = self.convs(x, x_mask)
         x = self.proj(x) * x_mask
 
@@ -404,7 +404,7 @@ class DurationPredictor(nn.Module):
         x = torch.detach(x)
         if g is not None:
             g = torch.detach(g)
-            x.add_(self.cond(g))
+            x = commons.residual_add(x, self.cond(g))
         x = self.conv_1(x * x_mask)
         x.relu_()
         x = self.norm_1(x)
@@ -654,7 +654,7 @@ class Generator(torch.nn.Module):
     def forward(self, x: torch.Tensor, g: torch.Tensor | None = None) -> torch.Tensor:
         x = self.conv_pre(x)
         if g is not None:
-            x.add_(self.cond(g))
+            x = commons.residual_add(x, self.cond(g))
 
         for i in range(self.num_upsamples):
             F.leaky_relu(x, modules.LRELU_SLOPE, inplace=True)

@@ -23,6 +23,23 @@ def init_weights(m: torch.nn.Module, mean: float = 0.0, std: float = 0.01) -> No
         m.weight.data.normal_(mean, std)  # type: ignore
 
 
+def residual_add(base: torch.Tensor, residual: torch.Tensor) -> torch.Tensor:
+    """
+    学習時は非破壊的に加算し、推論時のみ in-place 加算を行う残差加算ユーティリティ
+
+    Args:
+        base (torch.Tensor): 加算先のテンソル
+        residual (torch.Tensor): 加算するテンソル
+
+    Returns:
+        torch.Tensor: 加算後のテンソル
+    """
+
+    if torch.is_grad_enabled() and base.requires_grad:
+        return base + residual
+    return base.add_(residual)
+
+
 def get_padding(kernel_size: int, dilation: int = 1) -> int:
     """
     カーネルサイズと膨張率からパディングの大きさを計算する
