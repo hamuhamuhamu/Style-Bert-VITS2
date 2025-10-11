@@ -115,15 +115,15 @@ class Encoder(nn.Module):
                 g = self.spk_emb_linear(g.transpose(1, 2))
                 assert g is not None
                 g = g.transpose(1, 2)
-                x = commons.residual_add(x, g)
+                x = commons.auto_inplace_add(x, g)
                 x = x * x_mask
             y = self.attn_layers[i](x, x, attn_mask, use_fp16=use_fp16)
             y = self.drop(y)
-            x = self.norm_layers_1[i](commons.residual_add(x, y))
+            x = self.norm_layers_1[i](commons.auto_inplace_add(x, y))
 
             y = self.ffn_layers[i](x, x_mask)
             y = self.drop(y)
-            x = self.norm_layers_2[i](commons.residual_add(x, y))
+            x = self.norm_layers_2[i](commons.auto_inplace_add(x, y))
         x = x * x_mask
         return x
 
@@ -207,15 +207,15 @@ class Decoder(nn.Module):
         for i in range(self.n_layers):
             y = self.self_attn_layers[i](x, x, self_attn_mask)
             y = self.drop(y)
-            x = self.norm_layers_0[i](commons.residual_add(x, y))
+            x = self.norm_layers_0[i](commons.auto_inplace_add(x, y))
 
             y = self.encdec_attn_layers[i](x, h, encdec_attn_mask)
             y = self.drop(y)
-            x = self.norm_layers_1[i](commons.residual_add(x, y))
+            x = self.norm_layers_1[i](commons.auto_inplace_add(x, y))
 
             y = self.ffn_layers[i](x, x_mask)
             y = self.drop(y)
-            x = self.norm_layers_2[i](commons.residual_add(x, y))
+            x = self.norm_layers_2[i](commons.auto_inplace_add(x, y))
         x = x * x_mask
         return x
 
@@ -498,7 +498,7 @@ class FFN(nn.Module):
         if self.activation == "gelu":
             x = x * torch.sigmoid(1.702 * x)
         else:
-            x.relu_()
+            x = commons.auto_inplace_relu(x)
         x = self.drop(x)
         x = self.conv_2(self.padding(x * x_mask))
         return x * x_mask

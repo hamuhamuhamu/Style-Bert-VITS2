@@ -23,9 +23,23 @@ def init_weights(m: torch.nn.Module, mean: float = 0.0, std: float = 0.01) -> No
         m.weight.data.normal_(mean, std)  # type: ignore
 
 
-def residual_add(base: torch.Tensor, residual: torch.Tensor) -> torch.Tensor:
+def should_use_inplace(tensor: torch.Tensor) -> bool:
     """
-    学習時は非破壊的に加算し、推論時のみ in-place 加算を行う残差加算ユーティリティ
+    in-place 演算を安全に実行可能かどうかを判定する
+
+    Args:
+        tensor (torch.Tensor): 判定対象のテンソル
+
+    Returns:
+        bool: in-place 演算を許可すべきなら True
+    """
+
+    return not (torch.is_grad_enabled() and tensor.requires_grad)
+
+
+def auto_inplace_add(base: torch.Tensor, residual: torch.Tensor) -> torch.Tensor:
+    """
+    学習時は非破壊的に加算し、推論時のみ in-place で加算する
 
     Args:
         base (torch.Tensor): 加算先のテンソル
@@ -35,9 +49,64 @@ def residual_add(base: torch.Tensor, residual: torch.Tensor) -> torch.Tensor:
         torch.Tensor: 加算後のテンソル
     """
 
-    if torch.is_grad_enabled() and base.requires_grad:
-        return base + residual
-    return base.add_(residual)
+    if should_use_inplace(base):
+        base.add_(residual)
+        return base
+    return base + residual
+
+
+def auto_inplace_relu(tensor: torch.Tensor) -> torch.Tensor:
+    """
+    学習時は非破壊的に ReLU を適用し、推論時のみ in-place で実行する
+
+    Args:
+        tensor (torch.Tensor): 活性化を適用するテンソル
+
+    Returns:
+        torch.Tensor: 活性化後のテンソル
+    """
+
+    if should_use_inplace(tensor):
+        return torch.relu_(tensor)
+    return torch.relu(tensor)
+
+
+def auto_inplace_leaky_relu(
+    tensor: torch.Tensor,
+    negative_slope: float = 0.01,
+) -> torch.Tensor:
+    """
+    学習時は非破壊的に LeakyReLU を適用し、推論時のみ in-place で実行する
+
+    Args:
+        tensor (torch.Tensor): 活性化を適用するテンソル
+        negative_slope (float): LeakyReLU の負側勾配
+
+    Returns:
+        torch.Tensor: 活性化後のテンソル
+    """
+
+    return F.leaky_relu(
+        tensor,
+        negative_slope=negative_slope,
+        inplace=should_use_inplace(tensor),
+    )
+
+
+def auto_inplace_tanh(tensor: torch.Tensor) -> torch.Tensor:
+    """
+    学習時は非破壊的に tanh を適用し、推論時のみ in-place で実行する
+
+    Args:
+        tensor (torch.Tensor): 活性化を適用するテンソル
+
+    Returns:
+        torch.Tensor: 活性化後のテンソル
+    """
+
+    if should_use_inplace(tensor):
+        return torch.tanh_(tensor)
+    return torch.tanh(tensor)
 
 
 def get_padding(kernel_size: int, dilation: int = 1) -> int:

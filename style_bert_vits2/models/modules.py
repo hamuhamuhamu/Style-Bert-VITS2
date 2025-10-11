@@ -318,7 +318,7 @@ class ResBlock1(torch.nn.Module):
             if x_mask is not None:
                 xt = xt * x_mask
             xt = c1(xt)
-            F.leaky_relu(xt, LRELU_SLOPE, inplace=True)
+            xt = commons.auto_inplace_leaky_relu(xt, LRELU_SLOPE)
             if x_mask is not None:
                 xt = xt * x_mask
             xt = c2(xt)
