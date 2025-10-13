@@ -1,4 +1,5 @@
 import json
+from collections.abc import Sequence
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -139,6 +140,27 @@ def save_recipe(recipe: dict[str, Any], model_name: str):
 
 def save_style_vectors(style_vectors: NDArray[Any], model_name: str):
     np.save(assets_root / model_name / "style_vectors.npy", style_vectors)
+
+
+def get_default_style_name(model_name: str) -> str:
+    """
+    モデルのデフォルトスタイル名（style_id = 0 のスタイル）を取得する。
+
+    Args:
+        model_name (str): モデル名
+
+    Returns:
+        str: デフォルトスタイル名
+    """
+
+    config, _ = load_model_config_and_style_vectors(model_name)
+    style2id = config["data"]["style2id"]
+    # style_id が 0 のスタイル名を取得
+    for style_name, style_id in style2id.items():
+        if style_id == 0:
+            return style_name
+    # 見つからない場合は "Neutral" をデフォルトとして返す
+    return DEFAULT_STYLE
 
 
 def merge_style_usual(
@@ -424,25 +446,29 @@ def merge_models_usual(
     }
     save_recipe(receipe, output_name)
 
-    # Merge default Neutral style vectors and save
+    # Merge default style vectors and save
     model_name_a = Path(model_path_a).parent.name
     model_name_b = Path(model_path_b).parent.name
     config_a, style_vectors_a = load_model_config_and_style_vectors(model_name_a)
     config_b, style_vectors_b = load_model_config_and_style_vectors(model_name_b)
 
+    # モデル A のデフォルトスタイル名を取得 (style_id = 0)
+    default_style_name_a = get_default_style_name(model_name_a)
+
     new_config = config_a
     new_config["model_name"] = output_name
     new_config["data"]["num_styles"] = 1
-    new_config["data"]["style2id"] = {DEFAULT_STYLE: 0}
+    new_config["data"]["style2id"] = {default_style_name_a: 0}
     if new_config["data"]["n_speakers"] == 1:
         new_config["data"]["spk2id"] = {output_name: 0}
     save_config(new_config, output_name)
 
-    neutral_vector_a = style_vectors_a[0]
-    neutral_vector_b = style_vectors_b[0]
+    # デフォルトスタイル (style_id = 0) のベクトルを取得してマージ
+    default_vector_a = style_vectors_a[0]
+    default_vector_b = style_vectors_b[0]
     weight = speech_style_weight
-    new_neutral_vector = (1 - weight) * neutral_vector_a + weight * neutral_vector_b
-    new_style_vectors = np.array([new_neutral_vector])
+    new_default_vector = (1 - weight) * default_vector_a + weight * default_vector_b
+    new_style_vectors = np.array([new_default_vector])
     save_style_vectors(new_style_vectors, output_name)
     return merged_model_path
 
@@ -498,7 +524,7 @@ def merge_models_add_diff(
     with open(assets_root / output_name / "recipe.json", "w", encoding="utf-8") as f:
         json.dump(info, f, indent=2, ensure_ascii=False)
 
-    # Default style merge only using Neutral style
+    # Default style merge only
     model_name_a = Path(model_path_a).parent.name
     model_name_b = Path(model_path_b).parent.name
     model_name_c = Path(model_path_c).parent.name
@@ -512,24 +538,28 @@ def merge_models_add_diff(
     config_c, style_vectors_c = load_model_config_and_style_vectors(
         model_name_c
     )  # (style_num_c, 256)
-    new_config = config_a
 
+    # モデル A のデフォルトスタイル名を取得 (style_id = 0)
+    default_style_name_a = get_default_style_name(model_name_a)
+
+    new_config = config_a
     new_config["model_name"] = output_name
     new_config["data"]["num_styles"] = 1
-    new_config["data"]["style2id"] = {DEFAULT_STYLE: 0}
+    new_config["data"]["style2id"] = {default_style_name_a: 0}
     if new_config["data"]["n_speakers"] == 1:
         new_config["data"]["spk2id"] = {output_name: 0}
     with open(assets_root / output_name / "config.json", "w", encoding="utf-8") as f:
         json.dump(new_config, f, indent=2, ensure_ascii=False)
 
-    neutral_vector_a = style_vectors_a[0]
-    neutral_vector_b = style_vectors_b[0]
-    neutral_vector_c = style_vectors_c[0]
+    # デフォルトスタイル (style_id = 0) のベクトルを取得してマージ
+    default_vector_a = style_vectors_a[0]
+    default_vector_b = style_vectors_b[0]
+    default_vector_c = style_vectors_c[0]
     weight = speech_style_weight
-    new_neutral_vector = neutral_vector_a + weight * (
-        neutral_vector_b - neutral_vector_c
+    new_default_vector = default_vector_a + weight * (
+        default_vector_b - default_vector_c
     )
-    new_style_vectors = np.array([new_neutral_vector])
+    new_style_vectors = np.array([new_default_vector])
     new_style_path = assets_root / output_name / "style_vectors.npy"
     np.save(new_style_path, new_style_vectors)
     return merged_model_path
@@ -573,7 +603,7 @@ def merge_models_weighted_sum(
     with open(assets_root / output_name / "recipe.json", "w", encoding="utf-8") as f:
         json.dump(info, f, indent=2, ensure_ascii=False)
 
-    # Default style merge only using Neutral style
+    # Default style merge only
     model_name_a = Path(model_path_a).parent.name
     model_name_b = Path(model_path_b).parent.name
     model_name_c = Path(model_path_c).parent.name
@@ -588,25 +618,28 @@ def merge_models_weighted_sum(
         model_name_c
     )  # (style_num_c, 256)
 
-    new_config = config_a
+    # モデル A のデフォルトスタイル名を取得 (style_id = 0)
+    default_style_name_a = get_default_style_name(model_name_a)
 
+    new_config = config_a
     new_config["model_name"] = output_name
     new_config["data"]["num_styles"] = 1
-    new_config["data"]["style2id"] = {DEFAULT_STYLE: 0}
+    new_config["data"]["style2id"] = {default_style_name_a: 0}
     if new_config["data"]["n_speakers"] == 1:
         new_config["data"]["spk2id"] = {output_name: 0}
     with open(assets_root / output_name / "config.json", "w", encoding="utf-8") as f:
         json.dump(new_config, f, indent=2, ensure_ascii=False)
 
-    neutral_vector_a = style_vectors_a[0]
-    neutral_vector_b = style_vectors_b[0]
-    neutral_vector_c = style_vectors_c[0]
-    new_neutral_vector = (
-        model_a_coeff * neutral_vector_a
-        + model_b_coeff * neutral_vector_b
-        + model_c_coeff * neutral_vector_c
+    # デフォルトスタイル (style_id = 0) のベクトルを取得してマージ
+    default_vector_a = style_vectors_a[0]
+    default_vector_b = style_vectors_b[0]
+    default_vector_c = style_vectors_c[0]
+    new_default_vector = (
+        model_a_coeff * default_vector_a
+        + model_b_coeff * default_vector_b
+        + model_c_coeff * default_vector_c
     )
-    new_style_vectors = np.array([new_neutral_vector])
+    new_style_vectors = np.array([new_default_vector])
     new_style_path = assets_root / output_name / "style_vectors.npy"
     np.save(new_style_path, new_style_vectors)
     return merged_model_path
@@ -655,7 +688,7 @@ def merge_models_add_null(
     with open(assets_root / output_name / "recipe.json", "w", encoding="utf-8") as f:
         json.dump(info, f, indent=2, ensure_ascii=False)
 
-    # Default style merge only using Neutral style
+    # Default style merge only
     model_name_a = Path(model_path_a).parent.name
     model_name_b = Path(model_path_b).parent.name
 
@@ -665,21 +698,25 @@ def merge_models_add_null(
     config_b, style_vectors_b = load_model_config_and_style_vectors(
         model_name_b
     )  # (style_num_b, 256)
-    new_config = config_a
 
+    # モデル A のデフォルトスタイル名を取得 (style_id = 0)
+    default_style_name_a = get_default_style_name(model_name_a)
+
+    new_config = config_a
     new_config["model_name"] = output_name
     new_config["data"]["num_styles"] = 1
-    new_config["data"]["style2id"] = {DEFAULT_STYLE: 0}
+    new_config["data"]["style2id"] = {default_style_name_a: 0}
     if new_config["data"]["n_speakers"] == 1:
         new_config["data"]["spk2id"] = {output_name: 0}
     with open(assets_root / output_name / "config.json", "w", encoding="utf-8") as f:
         json.dump(new_config, f, indent=2, ensure_ascii=False)
 
-    neutral_vector_a = style_vectors_a[0]
-    neutral_vector_b = style_vectors_b[0]
+    # デフォルトスタイル (style_id = 0) のベクトルを取得してマージ
+    default_vector_a = style_vectors_a[0]
+    default_vector_b = style_vectors_b[0]
     weight = speech_style_weight
-    new_neutral_vector = neutral_vector_a + weight * neutral_vector_b
-    new_style_vectors = np.array([new_neutral_vector])
+    new_default_vector = default_vector_a + weight * default_vector_b
+    new_style_vectors = np.array([new_default_vector])
     new_style_path = assets_root / output_name / "style_vectors.npy"
     np.save(new_style_path, new_style_vectors)
     return merged_model_path
@@ -711,6 +748,10 @@ def merge_models_gr(
     model_a_name = Path(model_path_a).parent.name
     model_b_name = Path(model_path_b).parent.name
     model_c_name = Path(model_path_c).parent.name
+
+    # マージ元のモデル A のデフォルトスタイル名を取得
+    default_style_name = get_default_style_name(model_a_name)
+
     if method == "usual":
         if output_name in [model_a_name, model_b_name]:
             return "Error: マージ元のモデル名と同じ名前は使用できません。", None
@@ -762,7 +803,7 @@ def merge_models_gr(
             output_name,
         )
     return f"Success: モデルを{merged_model_path}に保存しました。", gr.Dropdown(
-        choices=[DEFAULT_STYLE], value=DEFAULT_STYLE
+        choices=[default_style_name], value=default_style_name
     )
 
 
@@ -880,9 +921,14 @@ def update_three_model_names_dropdown(model_holder: TTSModelHolder):
     return new_names, new_files, new_names, new_files, new_names, new_files
 
 
-def get_styles(model_name: str):
+def get_styles(model_name: str) -> list[str]:
     config, _ = load_model_config_and_style_vectors(model_name)
-    styles = list(config["data"]["style2id"].keys())
+    style2id = config["data"]["style2id"]
+    styles = list(style2id.keys())
+    default_style = get_default_style_name(model_name)
+    if default_style in styles:
+        styles.remove(default_style)
+        styles.insert(0, default_style)
     return styles
 
 
@@ -897,12 +943,15 @@ def load_styles_gr(model_name_a: str, model_name_b: str):
     config_b, _ = load_model_config_and_style_vectors(model_name_b)
     styles_b = list(config_b["data"]["style2id"].keys())
 
+    # モデル A のデフォルトスタイル名を取得（プレースホルダー用）
+    default_style_a = get_default_style_name(model_name_a)
+
     return (
         gr.Textbox(value=", ".join(styles_a)),
         gr.Textbox(value=", ".join(styles_b)),
         gr.TextArea(
             label="スタイルのマージリスト",
-            placeholder=f"{DEFAULT_STYLE}, {DEFAULT_STYLE},{DEFAULT_STYLE}\nAngry, Angry, Angry",
+            placeholder=f"{default_style_a}, {default_style_a}, {default_style_a}\nAngry, Angry, Angry",
             value="\n".join(
                 f"{sty_a}, {sty_b}, {sty_a if sty_a != sty_b else ''}{sty_b}"
                 for sty_a in styles_a
@@ -1097,6 +1146,12 @@ def create_merge_app(model_holder: TTSModelHolder) -> gr.Blocks:
         str(f) for f in model_holder.model_files_dict[model_names[initial_id]]
     ]
 
+    # 最初のモデルのデフォルトスタイル名とスタイル一覧を取得（UI 初期化用）
+    initial_default_style = get_default_style_name(model_names[initial_id])
+    initial_style_list_a = get_styles(model_names[initial_id])
+    initial_style_list_b = get_styles(model_names[initial_id])
+    initial_style_list_c = get_styles(model_names[initial_id])
+
     with gr.Blocks(theme=GRADIO_THEME) as app:
         gr.Markdown(
             "複数のStyle-Bert-VITS2モデルから、声質・話し方・話す速さを取り替えたり混ぜたり引いたりして新しいモデルを作成できます。"
@@ -1219,8 +1274,8 @@ def create_merge_app(model_holder: TTSModelHolder) -> gr.Blocks:
                 with gr.Column():
                     style = gr.Dropdown(
                         label="スタイル",
-                        choices=[DEFAULT_STYLE],
-                        value=DEFAULT_STYLE,
+                        choices=[initial_default_style],
+                        value=initial_default_style,
                     )
                     emotion_weight = gr.Slider(
                         minimum=0,
@@ -1234,9 +1289,9 @@ def create_merge_app(model_holder: TTSModelHolder) -> gr.Blocks:
             audio_output = gr.Audio(label="結果")
         with gr.Column(variant="panel"):
             gr.Markdown(style_merge_md)
-            style_a_list = gr.State([DEFAULT_STYLE])
-            style_b_list = gr.State([DEFAULT_STYLE])
-            style_c_list = gr.State([DEFAULT_STYLE])
+            style_a_list = gr.State(initial_style_list_a)
+            style_b_list = gr.State(initial_style_list_b)
+            style_c_list = gr.State(initial_style_list_c)
             gr.Markdown("Hello world!")
             with gr.Row():
                 style_count = gr.Number(label="作るスタイルの数", value=1, step=1)
@@ -1248,10 +1303,11 @@ def create_merge_app(model_holder: TTSModelHolder) -> gr.Blocks:
                 outputs=[style_a_list, style_b_list, style_c_list],
             )
 
-            def join_names(*args):
-                if all(arg == DEFAULT_STYLE for arg in args):
-                    return DEFAULT_STYLE
-                return "_".join(args)
+            def join_names(*args: str) -> str:
+                unique = {arg for arg in args if arg != ""}
+                if len(unique) == 1:
+                    return next(iter(unique))
+                return "_".join(arg for arg in args if arg != "")
 
             @gr.render(
                 inputs=[
@@ -1260,37 +1316,70 @@ def create_merge_app(model_holder: TTSModelHolder) -> gr.Blocks:
                     style_b_list,
                     style_c_list,
                     method,
+                    model_name_a,
+                    model_name_b,
+                    model_name_c,
                 ]
             )
             def render_style(
-                style_count, style_a_list, style_b_list, style_c_list, method
-            ):
+                style_count: int,
+                style_a_list: list[str] | tuple[str, ...],
+                style_b_list: list[str] | tuple[str, ...],
+                style_c_list: list[str] | tuple[str, ...],
+                method: str,
+                model_name_a_value: str,
+                model_name_b_value: str,
+                model_name_c_value: str,
+            ) -> None:
                 a_components = []
                 b_components = []
                 c_components = []
                 out_components = []
+
+                def _ensure_list(value: Sequence[str]) -> list[str]:
+                    if isinstance(value, list):
+                        return value
+                    return list(value)
+
+                preferred_style_a = get_default_style_name(model_name_a_value)
+                preferred_style_b = get_default_style_name(model_name_b_value)
+                preferred_style_c = get_default_style_name(model_name_c_value)
+
+                style_a_list_values = _ensure_list(style_a_list)
+                style_b_list_values = _ensure_list(style_b_list)
+                style_c_list_values = _ensure_list(style_c_list)
+
                 if method in ["usual", "add_null"]:
                     for i in range(style_count):
                         with gr.Row():
+                            # デフォルト値は各モデルの style_id=0 のスタイル名を使用
+                            style_a_choices = style_a_list_values or [preferred_style_a]
+                            style_b_choices = style_b_list_values or [preferred_style_b]
+                            if preferred_style_a not in style_a_choices:
+                                style_a_choices = [preferred_style_a] + style_a_choices
+                            if preferred_style_b not in style_b_choices:
+                                style_b_choices = [preferred_style_b] + style_b_choices
+                            default_style_a = preferred_style_a
+                            default_style_b = preferred_style_b
                             style_a = gr.Dropdown(
                                 label="モデルAのスタイル名",
                                 key=f"style_a_{i}",
-                                choices=style_a_list,
-                                value=DEFAULT_STYLE,
-                                interactive=i != 0,
+                                choices=style_a_choices,
+                                value=default_style_a,
+                                interactive=True,
                             )
                             style_b = gr.Dropdown(
                                 label="モデルBのスタイル名",
                                 key=f"style_b_{i}",
-                                choices=style_b_list,
-                                value=DEFAULT_STYLE,
-                                interactive=i != 0,
+                                choices=style_b_choices,
+                                value=default_style_b,
+                                interactive=True,
                             )
                             style_out = gr.Textbox(
                                 label="出力スタイル名",
                                 key=f"style_out_{i}",
-                                value=DEFAULT_STYLE,
-                                interactive=i != 0,
+                                value=default_style_a,
+                                interactive=True,
                             )
                             style_a.change(
                                 join_names,
@@ -1374,32 +1463,45 @@ def create_merge_app(model_holder: TTSModelHolder) -> gr.Blocks:
                 elif method in ["add_diff", "weighted_sum"]:
                     for i in range(style_count):
                         with gr.Row():
+                            # デフォルト値は各モデルの style_id=0 のスタイル名を使用
+                            style_a_choices = style_a_list_values or [preferred_style_a]
+                            style_b_choices = style_b_list_values or [preferred_style_b]
+                            style_c_choices = style_c_list_values or [preferred_style_c]
+                            if preferred_style_a not in style_a_choices:
+                                style_a_choices = [preferred_style_a] + style_a_choices
+                            if preferred_style_b not in style_b_choices:
+                                style_b_choices = [preferred_style_b] + style_b_choices
+                            if preferred_style_c not in style_c_choices:
+                                style_c_choices = [preferred_style_c] + style_c_choices
+                            default_style_a = preferred_style_a
+                            default_style_b = preferred_style_b
+                            default_style_c = preferred_style_c
                             style_a = gr.Dropdown(
                                 label="モデルAのスタイル名",
                                 key=f"style_a_{i}",
-                                choices=style_a_list,
-                                value=DEFAULT_STYLE,
-                                interactive=i != 0,
+                                choices=style_a_choices,
+                                value=default_style_a,
+                                interactive=True,
                             )
                             style_b = gr.Dropdown(
                                 label="モデルBのスタイル名",
                                 key=f"style_b_{i}",
-                                choices=style_b_list,
-                                value=DEFAULT_STYLE,
-                                interactive=i != 0,
+                                choices=style_b_choices,
+                                value=default_style_b,
+                                interactive=True,
                             )
                             style_c = gr.Dropdown(
                                 label="モデルCのスタイル名",
                                 key=f"style_c_{i}",
-                                choices=style_c_list,
-                                value=DEFAULT_STYLE,
-                                interactive=i != 0,
+                                choices=style_c_choices,
+                                value=default_style_c,
+                                interactive=True,
                             )
                             style_out = gr.Textbox(
                                 label="出力スタイル名",
                                 key=f"style_out_{i}",
-                                value=DEFAULT_STYLE,
-                                interactive=i != 0,
+                                value=default_style_a,
+                                interactive=True,
                             )
                             style_a.change(
                                 join_names,
