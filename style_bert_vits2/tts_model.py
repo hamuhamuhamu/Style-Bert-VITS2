@@ -3,9 +3,11 @@ from __future__ import annotations
 import gc
 import time
 from collections.abc import Sequence
+from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import aivmlib
 import numpy as np
 import onnxruntime
 from numpy.typing import NDArray
@@ -681,15 +683,38 @@ class TTSModelHolder:
             if len(model_files) == 0:
                 logger.warning(f"No model files found in {model_dir}, so skip it")
                 continue
+
+            # aivm / aivmx ファイルが存在するかチェック
+            aivm_files = [f for f in model_files if f.suffix in [".aivm", ".aivmx"]]
             config_path = model_dir / "config.json"
-            if not config_path.exists():
+
+            # ハイパーパラメータを読み込む
+            # aivm / aivmx ファイルが存在する場合はそこから読み込み、
+            # 存在しない場合は config.json から読み込む
+            if len(aivm_files) > 0:
+                # aivm / aivmx ファイルが存在する場合は、最初のファイルから読み込む
+                try:
+                    hyper_parameters, _ = self._load_config_and_style_vectors_from_aivm(
+                        aivm_files[0]
+                    )
+                except Exception as ex:
+                    logger.warning(
+                        f"Failed to load hyper parameters from {aivm_files[0]}, so skip {model_dir}",
+                        exc_info=ex,
+                    )
+                    continue
+            elif config_path.exists():
+                # config.json が存在する場合は、そこから読み込む
+                hyper_parameters = HyperParameters.load_from_json(config_path)
+            else:
+                # aivm / aivmx ファイルも config.json も存在しない場合はスキップ
                 logger.warning(
-                    f"Config file {config_path} not found, so skip {model_dir}"
+                    f"Neither AIVM/AIVMX files nor config.json found in {model_dir}, so skip it"
                 )
                 continue
+
             self.model_files_dict[model_dir.name] = model_files
             self.model_names.append(model_dir.name)
-            hyper_parameters = HyperParameters.load_from_json(config_path)
             style2id: dict[str, int] = hyper_parameters.data.style2id
             styles = list(style2id.keys())
             spk2id: dict[str, int] = hyper_parameters.data.spk2id
@@ -702,6 +727,37 @@ class TTSModelHolder:
                     speakers=speakers,
                 )
             )
+
+    def _load_config_and_style_vectors_from_aivm(
+        self, model_path: Path
+    ) -> tuple[HyperParameters, NDArray[Any]]:
+        """
+        AIVM/AIVMX ファイルに内蔵されているハイパーパラメータとスタイルベクトルを読み込む。
+
+        Args:
+            model_path (Path): AIVM/AIVMX ファイルのパス
+
+        Returns:
+            tuple[HyperParameters, NDArray[Any]]: ハイパーパラメータとスタイルベクトル
+        """
+
+        # 拡張子が .aivm なら read_aivm_metadata(), 拡張子が .aivmx なら read_aivmx_metadata() を呼び出す
+        if model_path.suffix == ".aivm":
+            with model_path.open("rb") as f:
+                aivm_metadata = aivmlib.read_aivm_metadata(f)
+        elif model_path.suffix == ".aivmx":
+            with model_path.open("rb") as f:
+                aivm_metadata = aivmlib.read_aivmx_metadata(f)
+        else:
+            raise ValueError(f"Unsupported model file: {model_path}")
+        # ハイパーパラメータを読み込む
+        hyper_parameters = HyperParameters.model_validate(
+            aivm_metadata.hyper_parameters.model_dump()
+        )
+        # スタイルベクトルを読み込む
+        assert aivm_metadata.style_vectors is not None
+        style_vectors = np.load(BytesIO(aivm_metadata.style_vectors))
+        return hyper_parameters, style_vectors
 
     def get_model(self, model_name: str, model_path_str: str) -> TTSModel:
         """
@@ -722,10 +778,16 @@ class TTSModelHolder:
         if model_path not in self.model_files_dict[model_name]:
             raise ValueError(f"Model file `{model_path}` is not found")
         if self.current_model is None or self.current_model.model_path != model_path:
+            if model_path.suffix == ".aivm" or model_path.suffix == ".aivmx":
+                result = self._load_config_and_style_vectors_from_aivm(model_path)
+                config, style_vec = result
+            else:
+                config = self.root_dir / model_name / "config.json"
+                style_vec = self.root_dir / model_name / "style_vectors.npy"
             self.current_model = TTSModel(
                 model_path=model_path,
-                config_path=self.root_dir / model_name / "config.json",
-                style_vec_path=self.root_dir / model_name / "style_vectors.npy",
+                config_path=config,
+                style_vec_path=style_vec,
                 device=self.device,
                 onnx_providers=self.onnx_providers,
                 use_fp16=self.use_fp16,
@@ -753,10 +815,16 @@ class TTSModelHolder:
                 gr.Button(interactive=True, value="音声合成"),
                 gr.Dropdown(choices=speakers, value=speakers[0]),
             )
+        if model_path.suffix == ".aivm" or model_path.suffix == ".aivmx":
+            result = self._load_config_and_style_vectors_from_aivm(model_path)
+            config, style_vec = result
+        else:
+            config = self.root_dir / model_name / "config.json"
+            style_vec = self.root_dir / model_name / "style_vectors.npy"
         self.current_model = TTSModel(
             model_path=model_path,
-            config_path=self.root_dir / model_name / "config.json",
-            style_vec_path=self.root_dir / model_name / "style_vectors.npy",
+            config_path=config,
+            style_vec_path=style_vec,
             device=self.device,
             onnx_providers=self.onnx_providers,
             use_fp16=self.use_fp16,

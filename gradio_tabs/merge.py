@@ -1,10 +1,13 @@
 import json
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
+import aivmlib
 import gradio as gr
 import numpy as np
 import torch
+from numpy.typing import NDArray
 from safetensors import safe_open
 from safetensors.torch import save_file
 
@@ -33,10 +36,85 @@ def load_safetensors(model_path: str | Path) -> dict[str, torch.Tensor]:
     return result
 
 
-def load_config(model_name: str) -> dict[str, Any]:
+def find_aivm_file(model_name: str) -> Path | None:
+    """
+    指定されたモデル名のディレクトリ内に .aivm ファイルが存在するか確認し、
+    存在する場合はそのパスを返す。
+    (.aivmx は ONNX ベースなのでマージでは使用しない)
+
+    Args:
+        model_name (str): モデル名
+
+    Returns:
+        Path | None: .aivm ファイルのパス、存在しない場合は None
+    """
+
+    model_dir = assets_root / model_name
+    if not model_dir.exists():
+        return None
+
+    # .aivm ファイルを検索
+    aivm_files = list(model_dir.glob("*.aivm"))
+    if len(aivm_files) > 0:
+        return aivm_files[0]
+
+    return None
+
+
+def load_config_and_style_vectors_from_aivm(
+    aivm_path: Path,
+) -> tuple[dict[str, Any], NDArray[Any]]:
+    """
+    AIVM ファイルからハイパーパラメータとスタイルベクトルを読み込む。
+
+    Args:
+        aivm_path (Path): AIVM ファイルのパス
+
+    Returns:
+        tuple[dict[str, Any], NDArray[Any]]: ハイパーパラメータの辞書とスタイルベクトル
+    """
+
+    if aivm_path.suffix != ".aivm":
+        raise ValueError(f"Expected .aivm file, got: {aivm_path}")
+
+    with aivm_path.open("rb") as f:
+        aivm_metadata = aivmlib.read_aivm_metadata(f)
+
+    # ハイパーパラメータを辞書として取得
+    config = aivm_metadata.hyper_parameters.model_dump()
+
+    # スタイルベクトルを読み込む
+    assert aivm_metadata.style_vectors is not None
+    style_vectors = np.load(BytesIO(aivm_metadata.style_vectors))
+
+    return config, style_vectors
+
+
+def load_model_config_and_style_vectors(
+    model_name: str,
+) -> tuple[dict[str, Any], NDArray[Any]]:
+    """
+    モデル名から config とスタイルベクトルを読み込む。
+    .aivm ファイルがある場合はそこから読み込み、
+    ない場合は従来の config.json と style_vectors.npy から読み込む。
+
+    Args:
+        model_name (str): モデル名
+
+    Returns:
+        tuple[dict[str, Any], NDArray[Any]]: config の辞書とスタイルベクトル
+    """
+
+    # .aivm ファイルが存在するかチェック
+    aivm_path = find_aivm_file(model_name)
+    if aivm_path is not None:
+        return load_config_and_style_vectors_from_aivm(aivm_path)
+
+    # 従来の形式で読み込む
     with open(assets_root / model_name / "config.json", encoding="utf-8") as f:
         config = json.load(f)
-    return config
+    style_vectors = np.load(assets_root / model_name / "style_vectors.npy")
+    return config, style_vectors
 
 
 def save_config(config: dict[str, Any], model_name: str):
@@ -59,11 +137,7 @@ def save_recipe(recipe: dict[str, Any], model_name: str):
         json.dump(recipe, f, indent=2, ensure_ascii=False)
 
 
-def load_style_vectors(model_name: str) -> np.ndarray:
-    return np.load(assets_root / model_name / "style_vectors.npy")
-
-
-def save_style_vectors(style_vectors: np.ndarray, model_name: str):
+def save_style_vectors(style_vectors: NDArray[Any], model_name: str):
     np.save(assets_root / model_name / "style_vectors.npy", style_vectors)
 
 
@@ -78,10 +152,8 @@ def merge_style_usual(
     new = (1 - weight) * A + weight * B
     style_triple_list: list[(model_aでのスタイル名, model_bでのスタイル名, 出力するスタイル名)]
     """
-    style_vectors_a = load_style_vectors(model_name_a)
-    style_vectors_b = load_style_vectors(model_name_b)
-    config_a = load_config(model_name_a)
-    config_b = load_config(model_name_b)
+    config_a, style_vectors_a = load_model_config_and_style_vectors(model_name_a)
+    config_b, style_vectors_b = load_model_config_and_style_vectors(model_name_b)
     style2id_a = config_a["data"]["style2id"]
     style2id_b = config_b["data"]["style2id"]
     new_style_vecs = []
@@ -129,12 +201,9 @@ def merge_style_add_diff(
     new = A + weight * (B - C)
     style_tuple_list: list[(model_aでのスタイル名, model_bでのスタイル名, model_cでのスタイル名, 出力するスタイル名)]
     """
-    style_vectors_a = load_style_vectors(model_name_a)
-    style_vectors_b = load_style_vectors(model_name_b)
-    style_vectors_c = load_style_vectors(model_name_c)
-    config_a = load_config(model_name_a)
-    config_b = load_config(model_name_b)
-    config_c = load_config(model_name_c)
+    config_a, style_vectors_a = load_model_config_and_style_vectors(model_name_a)
+    config_b, style_vectors_b = load_model_config_and_style_vectors(model_name_b)
+    config_c, style_vectors_c = load_model_config_and_style_vectors(model_name_c)
     style2id_a = config_a["data"]["style2id"]
     style2id_b = config_b["data"]["style2id"]
     style2id_c = config_c["data"]["style2id"]
@@ -188,12 +257,9 @@ def merge_style_weighted_sum(
     new = A * model_a_coeff + B * model_b_coeff + C * model_c_coeff
     style_tuple_list: list[(model_aでのスタイル名, model_bでのスタイル名, model_cでのスタイル名, 出力するスタイル名)]
     """
-    style_vectors_a = load_style_vectors(model_name_a)
-    style_vectors_b = load_style_vectors(model_name_b)
-    style_vectors_c = load_style_vectors(model_name_c)
-    config_a = load_config(model_name_a)
-    config_b = load_config(model_name_b)
-    config_c = load_config(model_name_c)
+    config_a, style_vectors_a = load_model_config_and_style_vectors(model_name_a)
+    config_b, style_vectors_b = load_model_config_and_style_vectors(model_name_b)
+    config_c, style_vectors_c = load_model_config_and_style_vectors(model_name_c)
     style2id_a = config_a["data"]["style2id"]
     style2id_b = config_b["data"]["style2id"]
     style2id_c = config_c["data"]["style2id"]
@@ -246,10 +312,8 @@ def merge_style_add_null(
     new = A + weight * B
     style_tuple_list: list[(model_aでのスタイル名, model_bでのスタイル名, 出力するスタイル名)]
     """
-    style_vectors_a = load_style_vectors(model_name_a)
-    style_vectors_b = load_style_vectors(model_name_b)
-    config_a = load_config(model_name_a)
-    config_b = load_config(model_name_b)
+    config_a, style_vectors_a = load_model_config_and_style_vectors(model_name_a)
+    config_b, style_vectors_b = load_model_config_and_style_vectors(model_name_b)
     style2id_a = config_a["data"]["style2id"]
     style2id_b = config_b["data"]["style2id"]
     new_style_vecs = []
@@ -363,10 +427,10 @@ def merge_models_usual(
     # Merge default Neutral style vectors and save
     model_name_a = Path(model_path_a).parent.name
     model_name_b = Path(model_path_b).parent.name
-    style_vectors_a = load_style_vectors(model_name_a)
-    style_vectors_b = load_style_vectors(model_name_b)
+    config_a, style_vectors_a = load_model_config_and_style_vectors(model_name_a)
+    config_b, style_vectors_b = load_model_config_and_style_vectors(model_name_b)
 
-    new_config = load_config(model_name_a)
+    new_config = config_a
     new_config["model_name"] = output_name
     new_config["data"]["num_styles"] = 1
     new_config["data"]["style2id"] = {DEFAULT_STYLE: 0}
@@ -439,17 +503,16 @@ def merge_models_add_diff(
     model_name_b = Path(model_path_b).parent.name
     model_name_c = Path(model_path_c).parent.name
 
-    style_vectors_a = np.load(
-        assets_root / model_name_a / "style_vectors.npy"
+    config_a, style_vectors_a = load_model_config_and_style_vectors(
+        model_name_a
     )  # (style_num_a, 256)
-    style_vectors_b = np.load(
-        assets_root / model_name_b / "style_vectors.npy"
+    config_b, style_vectors_b = load_model_config_and_style_vectors(
+        model_name_b
     )  # (style_num_b, 256)
-    style_vectors_c = np.load(
-        assets_root / model_name_c / "style_vectors.npy"
+    config_c, style_vectors_c = load_model_config_and_style_vectors(
+        model_name_c
     )  # (style_num_c, 256)
-    with open(assets_root / model_name_a / "config.json", encoding="utf-8") as f:
-        new_config = json.load(f)
+    new_config = config_a
 
     new_config["model_name"] = output_name
     new_config["data"]["num_styles"] = 1
@@ -515,18 +578,17 @@ def merge_models_weighted_sum(
     model_name_b = Path(model_path_b).parent.name
     model_name_c = Path(model_path_c).parent.name
 
-    style_vectors_a = np.load(
-        assets_root / model_name_a / "style_vectors.npy"
+    config_a, style_vectors_a = load_model_config_and_style_vectors(
+        model_name_a
     )  # (style_num_a, 256)
-    style_vectors_b = np.load(
-        assets_root / model_name_b / "style_vectors.npy"
+    config_b, style_vectors_b = load_model_config_and_style_vectors(
+        model_name_b
     )  # (style_num_b, 256)
-    style_vectors_c = np.load(
-        assets_root / model_name_c / "style_vectors.npy"
+    config_c, style_vectors_c = load_model_config_and_style_vectors(
+        model_name_c
     )  # (style_num_c, 256)
 
-    with open(assets_root / model_name_a / "config.json", encoding="utf-8") as f:
-        new_config = json.load(f)
+    new_config = config_a
 
     new_config["model_name"] = output_name
     new_config["data"]["num_styles"] = 1
@@ -597,14 +659,13 @@ def merge_models_add_null(
     model_name_a = Path(model_path_a).parent.name
     model_name_b = Path(model_path_b).parent.name
 
-    style_vectors_a = np.load(
-        assets_root / model_name_a / "style_vectors.npy"
+    config_a, style_vectors_a = load_model_config_and_style_vectors(
+        model_name_a
     )  # (style_num_a, 256)
-    style_vectors_b = np.load(
-        assets_root / model_name_b / "style_vectors.npy"
+    config_b, style_vectors_b = load_model_config_and_style_vectors(
+        model_name_b
     )  # (style_num_b, 256)
-    with open(assets_root / model_name_a / "config.json", encoding="utf-8") as f:
-        new_config = json.load(f)
+    new_config = config_a
 
     new_config["model_name"] = output_name
     new_config["data"]["num_styles"] = 1
@@ -820,9 +881,7 @@ def update_three_model_names_dropdown(model_holder: TTSModelHolder):
 
 
 def get_styles(model_name: str):
-    config_path = assets_root / model_name / "config.json"
-    with open(config_path, encoding="utf-8") as f:
-        config = json.load(f)
+    config, _ = load_model_config_and_style_vectors(model_name)
     styles = list(config["data"]["style2id"].keys())
     return styles
 
@@ -832,14 +891,10 @@ def get_triple_styles(model_name_a: str, model_name_b: str, model_name_c: str):
 
 
 def load_styles_gr(model_name_a: str, model_name_b: str):
-    config_path_a = assets_root / model_name_a / "config.json"
-    with open(config_path_a, encoding="utf-8") as f:
-        config_a = json.load(f)
+    config_a, _ = load_model_config_and_style_vectors(model_name_a)
     styles_a = list(config_a["data"]["style2id"].keys())
 
-    config_path_b = assets_root / model_name_b / "config.json"
-    with open(config_path_b, encoding="utf-8") as f:
-        config_b = json.load(f)
+    config_b, _ = load_model_config_and_style_vectors(model_name_b)
     styles_b = list(config_b["data"]["style2id"].keys())
 
     return (
@@ -1073,7 +1128,7 @@ def create_merge_app(model_holder: TTSModelHolder) -> gr.Blocks:
                 model_a_coeff = gr.Number(
                     label="モデルAの係数",
                     value=1.0,
-                    step=0.1,
+                    step=0.05,
                     visible=False,
                 )
             with gr.Column(scale=3):
@@ -1090,7 +1145,7 @@ def create_merge_app(model_holder: TTSModelHolder) -> gr.Blocks:
                 model_b_coeff = gr.Number(
                     label="モデルBの係数",
                     value=-1.0,
-                    step=0.1,
+                    step=0.05,
                     visible=False,
                 )
             with gr.Column(scale=3, visible=False) as c_col:
@@ -1107,7 +1162,7 @@ def create_merge_app(model_holder: TTSModelHolder) -> gr.Blocks:
                 model_c_coeff = gr.Number(
                     label="モデルCの係数",
                     value=0.0,
-                    step=0.1,
+                    step=0.05,
                     visible=False,
                 )
             refresh_button = gr.Button("更新", scale=1, visible=True)
@@ -1120,28 +1175,28 @@ def create_merge_app(model_holder: TTSModelHolder) -> gr.Blocks:
                     value=0,
                     minimum=0,
                     maximum=1,
-                    step=0.1,
+                    step=0.05,
                 )
                 voice_pitch_slider = gr.Slider(
                     label="声の高さ",
                     value=0,
                     minimum=0,
                     maximum=1,
-                    step=0.1,
+                    step=0.05,
                 )
                 speech_style_slider = gr.Slider(
                     label="話し方（抑揚・感情表現等）",
                     value=0,
                     minimum=0,
                     maximum=1,
-                    step=0.1,
+                    step=0.05,
                 )
                 tempo_slider = gr.Slider(
                     label="話す速さ・リズム・テンポ",
                     value=0,
                     minimum=0,
                     maximum=1,
-                    step=0.1,
+                    step=0.05,
                 )
                 use_slerp_instead_of_lerp = gr.Checkbox(
                     label="線形補完のかわりに球面線形補完を使う",
