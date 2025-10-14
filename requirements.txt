@@ -3,7 +3,7 @@ aivmlib
 cmudict
 cn2an
 e2k
-faster-whisper==0.10.1
+# faster-whisper==0.10.1
 g2p_en
 GPUtil
 gradio>=4.32
@@ -22,13 +22,13 @@ onnxruntime-gpu; sys_platform == 'linux' and platform_machine == 'x86_64'
 onnxsim-prebuilt
 protobuf==4.25
 psutil
-punctuators
+# punctuators
 pyannote.audio>=3.1.0
 pyloudnorm
 pyopenjtalk-plus
 pypinyin
 pyworld-prebuilt
-stable_ts
+# stable_ts
 tensorboard
 torch
 torchaudio
