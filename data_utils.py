@@ -181,11 +181,21 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
             word2ph[0] += 1
         bert_path = wav_path.replace(".wav", ".bert.pt")
         try:
-            bert_ori = torch.load(bert_path)
-            assert bert_ori.shape[-1] == len(phone)
-        except Exception as e:
-            logger.warning("Bert load Failed")
-            logger.warning(e)
+            # DataLoader 上で BERT 特徴量を CPU テンソルとして扱うことで、multiprocessing ワーカー上で CUDA の再初期化が試みられて
+            # "Cannot re-initialize CUDA in forked subprocess" エラーが発生する問題を回避する
+            bert_ori = torch.load(
+                bert_path,
+                map_location=torch.device("cpu"),
+            ).to(dtype=torch.float32)
+            if bert_ori.shape[-1] != len(phone):
+                raise ValueError(
+                    f"BERT length mismatch: {bert_ori.shape[-1]} vs {len(phone)}"
+                )
+            bert_ori = bert_ori.contiguous()
+        except Exception as ex:
+            logger.error("Bert load failed")
+            logger.error(ex)
+            raise RuntimeError(f"Failed to load BERT features from {bert_path}") from ex
 
         if language_str == "ZH":
             bert = bert_ori
@@ -199,6 +209,8 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
             bert = torch.zeros(1024, len(phone))
             ja_bert = torch.zeros(1024, len(phone))
             en_bert = bert_ori
+        else:
+            raise ValueError(f"Unsupported language: {language_str}")
         phone = torch.LongTensor(phone)
         tone = torch.LongTensor(tone)
         language = torch.LongTensor(language)
