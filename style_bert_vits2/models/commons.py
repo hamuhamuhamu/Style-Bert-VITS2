@@ -34,7 +34,8 @@ def should_use_inplace(tensor: torch.Tensor) -> bool:
         bool: in-place 演算を許可すべきなら True
     """
 
-    return not (torch.is_grad_enabled() and tensor.requires_grad)
+    # 推論時 (with torch.no_grad(): or with torch.inference_mode(): ブロック内) のみ in-place 演算を許可する
+    return not torch.is_grad_enabled()
 
 
 def auto_inplace_add(base: torch.Tensor, residual: torch.Tensor) -> torch.Tensor:
