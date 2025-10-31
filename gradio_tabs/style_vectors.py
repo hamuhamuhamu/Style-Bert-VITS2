@@ -6,10 +6,13 @@ importが重いので、WebUI全般が重くなっている。どうにかした
 import json
 import shutil
 from pathlib import Path
+from typing import Any
 
 import gradio as gr
 import matplotlib.pyplot as plt
 import numpy as np
+import torch
+from numpy.typing import NDArray
 from scipy.spatial.distance import pdist, squareform
 from sklearn.cluster import DBSCAN, AgglomerativeClustering, KMeans
 from sklearn.manifold import TSNE
@@ -19,11 +22,17 @@ from config import get_path_config
 from default_style import save_styles_by_dirs
 from style_bert_vits2.constants import DEFAULT_STYLE, GRADIO_THEME
 from style_bert_vits2.logging import logger
+from style_bert_vits2.tts_model import TTSModel
+from style_bert_vits2.utils.style_strength import (
+    apply_style_strength,
+    load_style_strength,
+)
 
 
 path_config = get_path_config()
 dataset_root = path_config.dataset_root
 assets_root = path_config.assets_root
+device = "cuda" if torch.cuda.is_available() else "cpu"
 
 MAX_CLUSTER_NUM = 10
 MAX_AUDIO_NUM = 10
@@ -37,6 +46,75 @@ x_reduced = None
 y_pred = np.array([])
 mean = np.array([])
 centroids = []
+
+
+def load_style_strength_table(model_name: str) -> tuple[list[tuple[str, int]], str]:
+    """スタイル強度調整用にスタイル一覧を取得する。"""
+
+    style_entries, message, is_success = load_style_strength(model_name, assets_root)
+    if is_success is False:
+        return [], message
+    return style_entries, message
+
+
+def apply_style_strength_table(model_name: str, rows: list[list[Any]] | None) -> str:
+    """入力値に基づいてスタイルベクトルを再スケーリングする。"""
+
+    _, message = apply_style_strength(model_name, assets_root, rows)
+    return message
+
+
+def update_preview_weight_slider(desired_max: float, current_value: float) -> gr.Slider:
+    """調整後の最大値に合わせて試聴用スライダーの上限と値を更新する。"""
+
+    new_value = current_value if current_value <= desired_max else desired_max
+    return gr.Slider(maximum=desired_max, value=new_value)
+
+
+def run_style_strength_tts(
+    model_name: str,
+    text: str,
+    style_name: str,
+    style_weight: float,
+) -> tuple[str, tuple[int, NDArray[Any]] | None]:
+    """スタイル強度調整タブ内で音声を試聴するための簡易 TTS を実行する。"""
+
+    if model_name.strip() == "":
+        return "モデル名を入力してください。", None
+    if style_name == "":
+        return "スタイルを選択してください。", None
+
+    model_path = assets_root / model_name / f"{model_name}.safetensors"
+    config_path = assets_root / model_name / "config.json"
+    style_vec_path = assets_root / model_name / "style_vectors.npy"
+
+    if not model_path.exists():
+        return f"{model_path} が存在しません。", None
+    if not config_path.exists():
+        return f"{config_path} が存在しません。", None
+    if not style_vec_path.exists():
+        return f"{style_vec_path} が存在しません。", None
+
+    model = TTSModel(model_path, config_path, style_vec_path, device)
+
+    return (
+        "Success: 音声を生成しました。",
+        model.infer(text, style=style_name, style_weight=style_weight),
+    )
+
+
+def build_style_dropdown_update(entries: list[tuple[str, int]]) -> gr.Dropdown:
+    """試聴スタイル選択用ドロップダウンを更新する。"""
+
+    choices = [name for name, _ in entries]
+    default_value = None
+    for name, style_id in entries:
+        if style_id != 0:
+            default_value = name
+            break
+    if default_value is None and choices:
+        default_value = choices[0]
+    return gr.Dropdown(choices=choices, value=default_value)
 
 
 def load(model_name: str, reduction_method: str):
@@ -577,6 +655,131 @@ def create_style_vectors_app():
                         inputs=[model_name, audio_files_text, style_names_text],
                         outputs=[info2],
                     )
+        with gr.Tab("スタイル強度調整"):
+            gr.Markdown(
+                "各スタイルごとに、「スタイルの強さ」パラメーターの効き方を統一します。<br>"
+                " まず共通の目標値（例: 10）を決め、試聴時の各スタイルのスタイル強度を徐々に上げていき、耳で聞いて「これ以上上げると音声が不自然になる」と感じた値を入力してください。<br>"
+                "結果を保存するとバックアップを作成の上で、既存の `style_vectors.npy` が上書きされます。"
+            )
+
+            load_strength_button = gr.Button("スタイル一覧を読み込む")
+            desired_max_slider = gr.Slider(
+                label="共通の目標値（例: 10）",
+                minimum=1.0,
+                maximum=50.0,
+                step=0.5,
+                value=10.0,
+            )
+
+            with gr.Row():
+                with gr.Column(scale=2):
+                    with gr.Row():
+                        preview_style_dropdown = gr.Dropdown(
+                            label="試聴するスタイル", choices=[]
+                        )
+                        preview_weight_slider = gr.Slider(
+                            label="試聴時のスタイル強度",
+                            minimum=0.0,
+                            maximum=50.0,
+                            step=0.5,
+                            value=5.0,
+                        )
+                    preview_text = gr.Textbox(
+                        label="試聴用テキスト",
+                        value="これはテスト音声です。これから調整前のスタイル強度の効き方を確認します。\nあなたがそんなこと言うなんて、私はとっても嬉しい。\nあなたがそんなこと言うなんて、私はとっても怒ってる。\nあなたがそんなこと言うなんて、私はとっても驚いてる。\nあなたがそんなこと言うなんて、私はとっても辛い。\n試聴時の各スタイルのスタイル強度を徐々に上げていき、耳で聞いて「これ以上上げると音声が不自然になる」と感じた値を入力してください。",
+                        lines=6,
+                    )
+                    preview_button = gr.Button(
+                        "調整前のスタイル強度で音声を試聴", variant="primary"
+                    )
+                with gr.Column(scale=1):
+                    preview_info = gr.Textbox(label="情報")
+                    preview_audio = gr.Audio(label="試聴結果")
+
+            adjustable_style_names: list[str] = []
+            adjustable_sliders: list[gr.Slider] = []
+            apply_strength_button = gr.Button(
+                "スタイルを保存",
+                variant="primary",
+            )
+            style_strength_info = gr.Textbox(label="結果")
+
+            style_strength_entries_state = gr.State([])
+
+            @gr.render(inputs=[style_strength_entries_state, desired_max_slider])
+            def render_style_strength_controls(
+                style_entries: list[tuple[str, int]], desired_max_value: float
+            ) -> None:
+                nonlocal adjustable_style_names, adjustable_sliders
+                adjustable_style_names = []
+                adjustable_sliders = []
+                if not style_entries:
+                    gr.Markdown("スタイル一覧を読み込んでください。")
+                    return
+                for style_name, style_id in style_entries:
+                    if style_id == 0:
+                        gr.Markdown(
+                            f"- {style_name} は平均スタイルのため調整対象外です。"
+                        )
+                        continue
+                    slider = gr.Slider(
+                        label=f"『{style_name}』の「これ以上上げると音声が不自然になる」と感じたスタイル強度の値",
+                        minimum=0.5,
+                        maximum=50.0,
+                        step=0.5,
+                        value=float(desired_max_value),
+                    )
+                    adjustable_style_names.append(style_name)
+                    adjustable_sliders.append(slider)
+                if not adjustable_sliders:
+                    gr.Markdown("調整対象のスタイルが存在しません。")
+
+                def _apply_strength(data: dict[gr.components.Component, Any]) -> str:
+                    if not adjustable_sliders:
+                        return "スタイル一覧を読み込んでください。"
+                    desired_max = data[desired_max_slider]
+                    rows: list[list[Any]] = []
+                    for style_name, slider in zip(
+                        adjustable_style_names, adjustable_sliders
+                    ):
+                        rows.append([style_name, data[slider], desired_max])
+                    return apply_style_strength_table(data[model_name], rows)
+
+                if adjustable_sliders:
+                    apply_strength_button.click(
+                        _apply_strength,
+                        inputs=set(
+                            [model_name, desired_max_slider] + adjustable_sliders
+                        ),
+                        outputs=[style_strength_info],
+                    )
+
+            load_strength_button.click(
+                load_style_strength_table,
+                inputs=[model_name],
+                outputs=[style_strength_entries_state, style_strength_info],
+            ).then(
+                build_style_dropdown_update,
+                inputs=[style_strength_entries_state],
+                outputs=[preview_style_dropdown],
+            )
+
+            desired_max_slider.change(
+                update_preview_weight_slider,
+                inputs=[desired_max_slider, preview_weight_slider],
+                outputs=[preview_weight_slider],
+            )
+
+            preview_button.click(
+                run_style_strength_tts,
+                inputs=[
+                    model_name,
+                    preview_text,
+                    preview_style_dropdown,
+                    preview_weight_slider,
+                ],
+                outputs=[preview_info, preview_audio],
+            )
 
     return app
 

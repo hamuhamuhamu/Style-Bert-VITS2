@@ -1287,6 +1287,7 @@ def create_merge_app(model_holder: TTSModelHolder) -> gr.Blocks:
                 tts_button = gr.Button("音声合成", variant="primary")
                 tts_info = gr.Textbox(label="情報")
             audio_output = gr.Audio(label="結果")
+
         with gr.Column(variant="panel"):
             gr.Markdown(style_merge_md)
             style_a_list = gr.State(initial_style_list_a)

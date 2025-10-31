@@ -653,7 +653,7 @@ def create_inference_app(model_holder: TTSModelHolder) -> gr.Blocks:
                 )
                 style_weight = gr.Slider(
                     minimum=0,
-                    maximum=20,
+                    maximum=50,
                     value=DEFAULT_STYLE_WEIGHT,
                     step=0.1,
                     label="スタイルの強さ（声が崩壊したら小さくしてください）",
