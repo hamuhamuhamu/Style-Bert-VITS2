@@ -287,7 +287,12 @@ class MultiHeadAttention(nn.Module):
         k = self.conv_k(c)
         v = self.conv_v(c)
 
-        x, self.attn = self.attention(q, k, v, mask=attn_mask, use_fp16=use_fp16)
+        # 学習時のみ self.attn に注意重みを保持し、推論時はメモリ節約のため保持しない
+        x, attn = self.attention(q, k, v, mask=attn_mask, use_fp16=use_fp16)
+        if torch.is_grad_enabled():
+            self.attn = attn
+        else:
+            self.attn = None
 
         x = self.conv_o(x)
         return x
