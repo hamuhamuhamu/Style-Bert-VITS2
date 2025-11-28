@@ -2,7 +2,7 @@ accelerate
 aivmlib
 cmudict
 cn2an
-e2k
+e2k @ git+https://github.com/tsukumijima/e2k.git@master
 g2p_en
 gradio>=4.32
 jaconv

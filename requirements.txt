@@ -2,7 +2,7 @@ accelerate
 aivmlib
 cmudict
 cn2an
-e2k
+e2k @ git+https://github.com/tsukumijima/e2k.git@master
 # faster-whisper==0.10.1
 g2p_en
 GPUtil
