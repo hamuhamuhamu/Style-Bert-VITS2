@@ -8,7 +8,6 @@ from pathlib import Path
 import numpy as np
 import torch
 from numpy.typing import NDArray
-from scipy.io import wavfile
 
 from style_bert_vits2.logging import logger
 
@@ -31,6 +30,8 @@ def save_benchmark_audio(
         suffix: ファイル名のサフィックス（オプション）
     """
     try:
+        from scipy.io import wavfile
+
         output_dir = Path(f"tests/wavs/{benchmark_name}")
         output_dir.mkdir(parents=True, exist_ok=True)
 

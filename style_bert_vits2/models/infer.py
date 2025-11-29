@@ -659,7 +659,7 @@ def infer_stream(
             zh_bert,
             ja_bert,
             en_bert,
-            style_vec,
+            style_vec_tensor,
             z,
             y_mask,
             g,

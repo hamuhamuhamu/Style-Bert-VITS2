@@ -129,6 +129,9 @@ def _get_optimal_padding_size(
     Returns:
         int: 最適なパディングサイズ
     """
+    if actual_length <= 0:
+        return actual_length
+
     for padding_size in padding_sizes:
         if padding_size >= actual_length:
             overhead_ratio = padding_size / actual_length
@@ -198,6 +201,11 @@ def _get_pooled_tensor(
             if tensor.shape == padded_shape_tuple:
                 # 使用時刻を更新して返す
                 pool[padded_length] = (tensor, time.time())
+                # プールから再利用したテンソルはゼロ初期化が必要な場合はゼロクリアする
+                # データは呼び出し元で上書きされるため、パディング領域のみのゼロ化でなく
+                # 全体をゼロ化する方が安全かつシンプル
+                if zero_init:
+                    tensor.zero_()
                 logger.debug(f"Reused pooled tensor: {pool_key}, size={padded_length}")
                 return tensor
             else:

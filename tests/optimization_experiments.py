@@ -515,8 +515,8 @@ def patch_flow_chunk_forward() -> tuple[
         seq_len = x.size(2)
         chunk_size = getattr(self, "_chunk_size", 1024)
         if seq_len > chunk_size:
-            return self._chunked_forward(x, x_mask, g, reverse, chunk_size)
-        return self._standard_forward(x, x_mask, g, reverse)
+            return self._chunked_forward(x, x_mask, g, reverse, chunk_size)  # pyright: ignore[reportPrivateUsage]
+        return self._standard_forward(x, x_mask, g, reverse)  # pyright: ignore[reportPrivateUsage]
 
     models.TransformerCouplingBlock.forward = forward_with_custom_chunk  # type: ignore[assignment]
     models_jp_extra.TransformerCouplingBlock.forward = forward_with_custom_chunk  # type: ignore[assignment]
@@ -604,10 +604,10 @@ def run_experiment_flow_chunk(
         if idx == 0:
             baseline_wave = waves[0]
         if baseline_wave is not None:
-            for m in metrics_list:
+            for wave_idx, m in enumerate(metrics_list):
                 max_abs_diff, mean_abs_diff = compute_waveform_diff(
                     baseline_wave,
-                    waves[0],
+                    waves[wave_idx],
                 )
                 m.max_abs_diff = max_abs_diff
                 m.mean_abs_diff = mean_abs_diff

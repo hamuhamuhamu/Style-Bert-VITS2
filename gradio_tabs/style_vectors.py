@@ -95,12 +95,14 @@ def run_style_strength_tts(
     if not style_vec_path.exists():
         return f"{style_vec_path} が存在しません。", None
 
+    # 試聴のたびに新しいモデルを作成するため、メモリリークを防ぐために
+    # 推論完了後に必ずアンロードする
     model = TTSModel(model_path, config_path, style_vec_path, device)
-
-    return (
-        "Success: 音声を生成しました。",
-        model.infer(text, style=style_name, style_weight=style_weight),
-    )
+    try:
+        result = model.infer(text, style=style_name, style_weight=style_weight)
+        return "Success: 音声を生成しました。", result
+    finally:
+        model.unload()
 
 
 def build_style_dropdown_update(entries: list[tuple[str, int]]) -> gr.Dropdown:
