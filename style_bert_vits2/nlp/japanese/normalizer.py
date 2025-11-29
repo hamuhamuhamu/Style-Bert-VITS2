@@ -13,8 +13,8 @@ from style_bert_vits2.nlp.symbols import PUNCTUATIONS
 
 # C2K / NGram の初期化
 # NGram は英単語として読ませるか、アルファベット読みするべきかを判定するモデル
-__C2K = C2K()
-__NGRAM = NGram()
+__characters_to_katakana = C2K()
+__should_transliterated_word_by_ngram = NGram()
 
 # 記号類の正規化マップ
 __SYMBOL_REPLACE_MAP = {
@@ -1298,10 +1298,12 @@ def __convert_english_to_katakana(text: str) -> str:
         # 8. NGram モデルを用いて「英単語として読むか」「アルファベット読みするか」を判定する
         ## 「アルファベット読みと誤判定される可能性がある単語」の正しい読みが含まれることもあるので、
         ## 通常の変換処理を通した後に行っている
-        should_spell_as_alphabet = not __NGRAM(word)
         ## オールキャップスな単語かつ、NGram モデルによってアルファベット読みすべきと判定された場合、そのままの表記で返す
         ## pyopenjtalk 側でアルファベット読みされるため、ここでカタカナに変換する必要はない
-        if word.isupper() is True and should_spell_as_alphabet is True:
+        if (
+            word.isupper() is True
+            and __should_transliterated_word_by_ngram(word) is False
+        ):
             return word
 
         # 9. 最終手段として、2単語への分割を試みる
@@ -1321,7 +1323,7 @@ def __convert_english_to_katakana(text: str) -> str:
                 # 2単語分割の結果と C2K の結果を比較し、長音記号「ー」が少ない方を選ぶ
                 # これにより、日本語のローマ字読み（例: "Musashi" → "ムサシ"）が
                 # 英語の発音規則に基づいた辞書エントリ（例: "musa" → "ムーサ"）より優先される
-                c2k_result = __C2K(word.lower())
+                c2k_result = __characters_to_katakana(word.lower())
                 split_long_vowel_count = split_result.count("ー")
                 c2k_long_vowel_count = c2k_result.count("ー")
                 if c2k_long_vowel_count < split_long_vowel_count:
@@ -1341,7 +1343,7 @@ def __convert_english_to_katakana(text: str) -> str:
                 number = number_match.group(2)
                 # まず base_word をカタカナに変換
                 # c2k は小文字でのみ動作する
-                converted_katakana = __C2K(base_word.lower())
+                converted_katakana = __characters_to_katakana(base_word.lower())
                 # 数字を英語表現に変換し、それをカタカナに変換
                 number_in_english = num2words(int(number), lang="en")
                 number_katakana = process_english_word(
@@ -1359,13 +1361,14 @@ def __convert_english_to_katakana(text: str) -> str:
                 # オールキャップスではない単語では常に c2k を通す
                 # オールキャップスな単語だが、NGram によって英単語として読むべきと判定された場合は c2k を通す
                 # いずれも3文字以上の場合のみ実行する (dB など単位系の誤変換を避けるため)
-                should_pronounce_as_word = __NGRAM(chunk)
-                if (
-                    chunk.isupper() is False or should_pronounce_as_word is True
-                ) and len(chunk) >= 3:
+                if len(chunk) >= 3 and (
+                    chunk.isupper() is False
+                    or __should_transliterated_word_by_ngram(chunk) is True
+                ):
                     # いずれかの文字がアルファベットの場合のみ適用
                     if any(__ALPHABET_PATTERN.match(c) for c in chunk):
-                        converted = __C2K(chunk.lower())  # c2k は小文字でのみ動作する
+                        # c2k は小文字でのみ動作する
+                        converted = __characters_to_katakana(chunk.lower())
                         converted_any = True
                         replacements.append((start, end, converted))
 
