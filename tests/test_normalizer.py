@@ -695,6 +695,23 @@ def test_normalize_text_english():
         == "パラボイススリーを4ギガバイトまでオタメシできます"
     )
 
+    # ローマ字読み (辞書に存在するもの)
+    assert normalize_text("Akagi") == "アカギ"
+    assert normalize_text("Akagisan") == "アカギサン"
+    assert normalize_text("Akahata") == "アカハタ"
+    assert normalize_text("Akasaka") == "アカサカ"
+    assert normalize_text("Akashi") == "アカシ"
+    assert normalize_text("Akashiyaki") == "アカシヤキ"
+    assert normalize_text("Akebono") == "アケボノ"
+    assert normalize_text("Akihabara") == "アキハバラ"
+    assert normalize_text("Akita") == "アキタ"
+    assert normalize_text("Akitainu") == "アキタイヌ"
+    assert normalize_text("Amae") == "アマエ"
+    assert normalize_text("Amagasaki") == "アマガサキ"
+    assert normalize_text("Amakusa") == "アマクサ"
+    assert normalize_text("Amazake") == "アマザケ"
+    assert normalize_text("Amezaiku") == "アメザイク"
+
     # ローマ字読み (C2K でいい感じに自動推定される)
     assert (
         normalize_text("KONO DENSHAWA YAMANOTESEN UCHIMAWARI")
