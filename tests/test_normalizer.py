@@ -77,6 +77,10 @@ def test_normalize_text_units():
     assert normalize_text("100Ghz") == "100ギガヘルツ"
     assert normalize_text("100Thz") == "100テラヘルツ"
     assert normalize_text("45.56khz") == "45.56キロヘルツ"
+    # ヘクトパスカル
+    assert normalize_text("100hPa") == "100ヘクトパスカル"
+    assert normalize_text("100hpa") == "100ヘクトパスカル"
+    assert normalize_text("100HPa") == "100ヘクトパスカル"
     # アンペア
     assert normalize_text("100A") == "100アンペア"
     assert normalize_text("100mA") == "100ミリアンペア"
@@ -574,10 +578,14 @@ def test_normalize_text_english():
     assert normalize_text("e-mail") == "イーメール"
     assert normalize_text("YouTube") == "ユーチューブ"
     # 辞書にない単語の変換
-    assert normalize_text("windsurfeditor") == "ウインドサーフエディター"
     assert (
-        normalize_text("WINDSURFEDITOR") == "WINDSURFEDITOR"
-    )  # 全て大文字の場合は変換しない
+        # 小文字の場合は2単語へ分割して辞書で変換
+        normalize_text("windsurfeditor") == "ウインドサーフエディター"
+    )
+    assert (
+        # 大文字の場合は2単語への分割が行われないので、C2K によるカタカナ読み推定結果が返る
+        normalize_text("WINDSURFEDITOR") == "ウインドサーフェディター"
+    )
     assert normalize_text("DevinProgrammerAgents") == "デビンプログラマーエージェンツ"
     # クオートの正規化処理
     assert normalize_text("I'm") == "アイム"
@@ -645,17 +653,17 @@ def test_normalize_text_english():
     )
     assert normalize_text("Gemini-2") == "ジェミニツー"
     assert (
-        normalize_text("Gemini-1.5")
-        == "ジェミニ1.5"  # 小数点は pyopenjtalk に任せた方が良い読みになるので変換しない
+        # 小数点は pyopenjtalk に任せた方が良い読みになるので変換しない
+        normalize_text("Gemini-1.5") == "ジェミニ1.5"
     )
     assert normalize_text("Gemini 2") == "ジェミニツー"
     assert (
-        normalize_text("Gemini 2.0")
-        == "ジェミニ2.0"  # 小数点は pyopenjtalk に任せた方が良い読みになるので変換しない
+        # 小数点は pyopenjtalk に任せた方が良い読みになるので変換しない
+        normalize_text("Gemini 2.0") == "ジェミニ2.0"
     )
     assert (
-        normalize_text("GPT‑4")
-        == "ジーピーティーフォー"  # ハイフンが Non-Breaking Hyphen になっている
+        # ハイフンが Non-Breaking Hyphen になっている
+        normalize_text("GPT‑4") == "ジーピーティーフォー"
     )
 
     # 単数を表す "a" の処理
@@ -664,8 +672,8 @@ def test_normalize_text_english():
     assert normalize_text("a student") == "アスチューデント"
     assert normalize_text("not a pen") == "ノットアペン"
     assert (
-        normalize_text("a OFDMEXA modular")
-        == "アOFDMEXAモジュラー"  # OFDMEXA は辞書未収録の造語かつ全て大文字なのでそのまま
+        # OFDMEXA は辞書未収録の造語かつ全て大文字で、NGram によって英単語として読むべきと判定されるのでそのまま
+        normalize_text("a OFDMEXA modular") == "アOFDMEXAモジュラー"
     )
     assert normalize_text("a 123") == "a123"  # 数字の前の a はそのまま
     assert normalize_text("This is a pen.") == "ディスイズアペン."
@@ -686,6 +694,19 @@ def test_normalize_text_english():
         normalize_text("Paravoice 3を4GBまでOTAMESHIできます")
         == "パラボイススリーを4ギガバイトまでオタメシできます"
     )
+
+    # ローマ字読み (C2K でいい感じに自動推定される)
+    assert (
+        normalize_text("KONO DENSHAWA YAMANOTESEN UCHIMAWARI")
+        == "コノデンシャワヤマノテーセンウチマワリ"
+    )
+    assert (
+        normalize_text("Next Station Is Musashi-Mizonokuchi.")
+        == "ネクストステイションイズムサシミゾノクチ."
+    )
+    assert normalize_text("ConoHa") == "コノハ"
+    assert normalize_text("KonoHa") == "コノハ"
+    assert normalize_text("QonoHa") == "コノハ"
 
     # 長い英文
     assert (
@@ -714,8 +735,9 @@ def test_normalize_text_english():
         == "アイムヒューマン,ウィズアップルペンシル.ビコーズ,ウィーハブアイフォンエイト."
     )
     assert (
+        # "GPT" は辞書に登録されているため "ジーピーティー" に変換される
         normalize_text("ModelTrainingWithGPT4TurboAndLlama3")
-        == "モデルトレーニングウィズGPT4ターボアンドラマスリー"
+        == "モデルトレーニングウィズジーピーティー4ターボアンドラマスリー"
     )
     assert (
         normalize_text("NextGenCloudComputingSystem2024")
@@ -726,8 +748,9 @@ def test_normalize_text_english():
         == "マシンラーニングプラスディープラーニングイコールエーアイ"
     )
     assert (
+        # "iPhone" は辞書に登録されているため "アイフォン" に変換される
         normalize_text("iPhoneProMax15-vs-GooglePixel8 Pro")
-        == "iフォンプロマックス15バーサスグーグルピクセルエイトプロ"
+        == "アイフォンプロマックス15バーサスグーグルピクセルエイトプロ"
     )
     assert (
         normalize_text("WebDev2023: HTML5+CSS3+JavaScript")
@@ -883,7 +906,7 @@ def test_normalize_text_complex():
     )
     assert (
         normalize_text("MacBookで1080p/60fpsの動画を2GB保存した。")
-        == "マックブックで1080p/60fpsの動画を2ギガバイト保存した."
+        == "マックブックで1080p/60エフピーエスの動画を2ギガバイト保存した."
     )
     assert (
         normalize_text("¥1,000の商品を2個買うと、¥2,000です（1,000×2=2,000）。")

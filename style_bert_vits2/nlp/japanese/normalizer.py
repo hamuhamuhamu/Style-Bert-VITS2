@@ -3,17 +3,18 @@ import sys
 import unicodedata
 from datetime import datetime
 
-from e2k import C2K
+from e2k import C2K, NGram
 from jaconv import jaconv
 from num2words import num2words
 
 from style_bert_vits2.nlp.japanese.katakana_map import KATAKANA_MAP
-from style_bert_vits2.nlp.japanese.romkan import to_katakana
 from style_bert_vits2.nlp.symbols import PUNCTUATIONS
 
 
-# C2K の初期化
+# C2K / NGram の初期化
+# NGram は英単語として読ませるか、アルファベット読みするべきかを判定するモデル
 __C2K = C2K()
+__NGRAM = NGram()
 
 # 記号類の正規化マップ
 __SYMBOL_REPLACE_MAP = {
@@ -304,6 +305,9 @@ __UNIT_MAP = {
     "khz": "キロヘルツ",
     "Khz": "キロヘルツ",
     "hz": "ヘルツ",
+    "hPa": "ヘクトパスカル",
+    "hpa": "ヘクトパスカル",
+    "HPa": "ヘクトパスカル",
     "Ebps": "エクサビーピーエス",
     "Pbps": "ペタビーピーエス",
     "Tbps": "テラビーピーエス",
@@ -334,7 +338,7 @@ __UNIT_PATTERN = re.compile(
     r"(?P<number>[0-9.]*[0-9](?:[eE][-+]?[0-9]+)?)\s*"
     r"(?P<unit>(?:(k|d|m)?L|(?:k|c|m)m[23]?|m[23]?|m(?![a-zA-Z])|"
     r"(?:k|m)?g|(?:k|K|M|G|T|P|E)(?:i)?B|B|t|d|h|s|ms|μs|ns|"
-    r"(?:k|m)?A|(?:k|K|M|G|T)?[Hh]z|(?:k|K|M|G|T|P|E)?(?:bps|bit|b)))"
+    r"(?:k|m)?A|(?:k|K|M|G|T)?[Hh]z|[Hh][Pp]a|(?:k|K|M|G|T|P|E)?(?:bps|bit|b)))"
     r"(?P<suffix>/[hs])?"
     r"(?=($|(?=/([^A-Za-z]|$))|[^/A-Za-z]))"
 )
@@ -1095,9 +1099,14 @@ def __convert_english_to_katakana(text: str) -> str:
             str: カタカナに変換された単語
         """
 
-        # 事前に word の前後のスペースが万が一あれば除去
+        # 事前に万が一 word の前後にスペースがあれば除去
         word = word.strip()
         # print(f"word: {word}")
+
+        # 単体の大文字アルファベットは単位や記号として使われるケースが多く、
+        # 安易にカタカナ読みすると不自然になりやすいため変換しない
+        if len(word) == 1 and word.isupper() is True:
+            return word
 
         # 数値（小数点を含む）を取り除いた後の文字列が UNIT_MAP に含まれる単位と完全一致する場合は実行しない
         # これにより、KATAKANA_MAP に "tb" が "ティービー" として別の読みで含まれていたとしても変換されずに済む
@@ -1222,75 +1231,108 @@ def __convert_english_to_katakana(text: str) -> str:
 
                 return "".join(parts)
 
+        # CamelCase 分割がキャンセルされたかどうかを示すフラグ
+        # CamelCase 分割がキャンセルされた場合は、2単語分割もスキップして直接 C2K に渡す
+        # これにより、"KonoHa" のような単語が "kono" + "ha" に誤分割されるのを防ぐ
+        camel_case_cancelled = False
+
         # 7. CamelCase の複合語を処理
         if any(c.isupper() for c in word[1:]):  # 2文字目以降に大文字が含まれる
             parts = split_camel_case(word)
             result_parts = []
+            all_parts_converted = True  # すべてのパーツが変換できたかどうか
 
             for part in parts:
-                # 大文字のみで構成される部分
-                # 辞書になければそのまま、pyopenjtalk でアルファベット読みされる
-                if all(c.isupper() for c in part):
-                    result_parts.append(KATAKANA_MAP.get(part, part))
+                # 3文字未満のアルファベットパーツは信頼性が低いため、分割をキャンセルする
+                # 2文字以下の英単語（例: "Ha" → "ハー"）は複合語の一部として分割すると
+                # 不自然な読みになることが多い（例: "KonoHa" → "コノハー" ではなく "コノハ" が正解）
+                # ただし、数字のみで構成されるパーツ（例: "4", "3"）は長さチェックの対象外とする
+                # （例: "GPT4Turbo" → "GPT" + "4" + "Turbo" の分割を許可する）
+                if len(part) < 3 and not part.isdigit():
+                    all_parts_converted = False
+                    break
+
+                # 数字のみで構成される部分はそのまま追加（後で pyopenjtalk で読まれる）
+                if part.isdigit():
+                    result_parts.append(part)
+                # 大文字のみで構成される部分（例: "GPT", "API"）
+                # 辞書検索時は小文字に変換して検索
+                elif all(c.isupper() for c in part):
+                    # まず大文字のまま検索、次に小文字で検索
+                    converted = KATAKANA_MAP.get(part) or KATAKANA_MAP.get(part.lower())
+                    if converted is not None:
+                        result_parts.append(converted)
+                    elif len(part) <= 4:
+                        # 短い大文字パーツ（4文字以下）で辞書にない場合はそのまま追加
+                        # （pyopenjtalk でアルファベット読みされる、例: "GPT" → "ジーピーティー"）
+                        result_parts.append(part)
+                    else:
+                        # 長い大文字パーツで辞書にない場合は分割をキャンセルし、
+                        # 元の単語全体を C2K で処理する（例: "WINDSURFEDITOR"）
+                        all_parts_converted = False
+                        break
                 else:
                     # それ以外は辞書で変換を試みる
-                    # enable_romaji_c2k を False に設定し、ローマ字変換と C2K 変換を無効にする
+                    # enable_romaji_c2k を False に設定し、ローマ字変換、C2K 変換、2単語分割を無効にする
                     converted = process_english_word(part, enable_romaji_c2k=False)
-                    result_parts.append(converted)
+                    # 変換結果が全てカタカナである場合のみ「変換成功」とみなす
+                    # これにより、辞書にない単語（例: "Cono"）が混ざった場合は分割をキャンセルし、
+                    # 元の単語全体を C2K に渡すことで正しい読みを取得できる
+                    if is_all_katakana(converted):
+                        result_parts.append(converted)
+                    else:
+                        all_parts_converted = False
+                        break
 
-            # ここでは戻らず、値の上書きのみにとどめる
-            word = "".join(result_parts)
+            # すべてのパーツが変換できた場合のみ分割結果を使用
+            if all_parts_converted is True:
+                return "".join(result_parts)
 
-            # fall through!!!
-            # ここでは return しない
+            # 変換できなかったパーツがある場合はフラグを設定し、元の単語で fall through
+            # 後続の2単語分割はスキップし、直接 C2K に渡す
+            camel_case_cancelled = True
 
         # アルファベットのチャンクを抽出
         alpha_chunks = extract_alphabet_chunks(word)
 
-        # 8. アルファベットが含まれる場合、ローマ字 -> カタカナ変換を試みる
-        # 2文字以上の英単語のみ変換を試みる (I -> イ のような1文字変換を防ぐ)
-        # この処理はあくまで辞書ベースで解決できなかった場合の最終手段なので、CamelCase を分割して個々の単語ごとに処理する際はこの処理は通らない
-        if alpha_chunks and enable_romaji_c2k is True:
-            # 変換情報を保存するリスト
-            replacements = []
-            converted_any = False
-
-            # 各チャンクに対して処理8を実行
-            for chunk, start, end in alpha_chunks:
-                converted = None
-
-                # アルファベットが2文字以上の場合のみ変換を試みる (I -> イ のような1文字変換を防ぐ)
-                if len(chunk) >= 2:
-                    katakana = to_katakana(chunk)
-                    # 全文字を完全にカタカナに変換できた場合のみ採用
-                    if not any(__ALPHABET_PATTERN.match(c) for c in katakana):
-                        converted = katakana
-
-                # 変換できた場合は置換情報を記録
-                if converted is not None:
-                    converted_any = True
-                    replacements.append((start, end, converted))
-
-            # 置換情報を元に新しい文字列を構築（後ろから処理することで位置ずれを防ぐ）
-            if converted_any:
-                for start, end, converted in sorted(replacements, reverse=True):
-                    # 元の単語のチャンク部分を変換結果で置き換える
-                    word = word[:start] + converted + word[end:]
-
-            # fall through!!!
-            # ここでは return しない
+        # 8. NGram モデルを用いて「英単語として読むか」「アルファベット読みするか」を判定する
+        ## 「アルファベット読みと誤判定される可能性がある単語」の正しい読みが含まれることもあるので、
+        ## 通常の変換処理を通した後に行っている
+        should_spell_as_alphabet = not __NGRAM(word)
+        ## オールキャップスな単語かつ、NGram モデルによってアルファベット読みすべきと判定された場合、そのままの表記で返す
+        ## pyopenjtalk 側でアルファベット読みされるため、ここでカタカナに変換する必要はない
+        if word.isupper() is True and should_spell_as_alphabet is True:
+            return word
 
         # 9. 最終手段として、2単語への分割を試みる
         # 最低4文字以上の単語のみ対象とし、全て大文字の単語の場合はこの処理を実行しない
-        if len(word) >= 4 and not word.isupper():
+        # enable_romaji_c2k が False の場合（CamelCase 分割後の再帰呼び出しなど）は、
+        # 誤った分割を防ぐためこの処理をスキップする
+        # CamelCase 分割がキャンセルされた場合も、誤分割を防ぐためこの処理をスキップする
+        # （例: "KonoHa" が "kono" + "ha" に分割されて "コノハー" になるのを防ぐ）
+        if (
+            len(word) >= 4
+            and not word.isupper()
+            and enable_romaji_c2k is True
+            and camel_case_cancelled is False
+        ):
             split_result = try_split_convert(word)
             if split_result is not None:
+                # 2単語分割の結果と C2K の結果を比較し、長音記号「ー」が少ない方を選ぶ
+                # これにより、日本語のローマ字読み（例: "Musashi" → "ムサシ"）が
+                # 英語の発音規則に基づいた辞書エントリ（例: "musa" → "ムーサ"）より優先される
+                c2k_result = __C2K(word.lower())
+                split_long_vowel_count = split_result.count("ー")
+                c2k_long_vowel_count = c2k_result.count("ー")
+                if c2k_long_vowel_count < split_long_vowel_count:
+                    return c2k_result
                 return split_result
 
         # 10. 本当に最後の手段として、C2K によるカタカナ読みの推定を試みる
-        # 4文字以上の英単語のみ変換を試みる
-        # この処理はあくまで辞書ベースで解決できなかった場合の最終手段なので、CamelCase を分割して個々の単語ごとに処理する際はこの処理は通らない
-        # ref: https://github.com/Patchethium/e2k
+        ## この処理はあくまで辞書ベースで解決できなかった場合の最終手段なので、CamelCase を分割して個々の単語ごとに処理する際はこの処理は通らない
+        ## 従来はこの処理を通す前に romkan でローマ字変換を通していたが、
+        ## C2K が実質的にローマ字変換も行えるようになったので、現在はローマ字変換も C2K に任せている
+        ## ref: https://github.com/Patchethium/e2k
         if alpha_chunks and enable_romaji_c2k is True:
             # 英単語の末尾に 11 以下の数字 (1.0 のような小数表記を除く) がつく場合の処理 (例: iPhone 11, Pixel8)
             number_match = __ENGLISH_WORD_WITH_NUMBER_PATTERN.match(word)
@@ -1314,9 +1356,14 @@ def __convert_english_to_katakana(text: str) -> str:
 
             # 各チャンクに対して処理10を実行
             for chunk, start, end in alpha_chunks:
-                # 4文字以上の場合のみ対象とし、全て大文字の場合はこの処理を実行しない
-                if len(chunk) >= 4 and not chunk.isupper():
-                    # いずれかの文字がアルファベットの場合のみ
+                # オールキャップスではない単語では常に c2k を通す
+                # オールキャップスな単語だが、NGram によって英単語として読むべきと判定された場合は c2k を通す
+                # いずれも3文字以上の場合のみ実行する (dB など単位系の誤変換を避けるため)
+                should_pronounce_as_word = __NGRAM(chunk)
+                if (
+                    chunk.isupper() is False or should_pronounce_as_word is True
+                ) and len(chunk) >= 3:
+                    # いずれかの文字がアルファベットの場合のみ適用
                     if any(__ALPHABET_PATTERN.match(c) for c in chunk):
                         converted = __C2K(chunk.lower())  # c2k は小文字でのみ動作する
                         converted_any = True

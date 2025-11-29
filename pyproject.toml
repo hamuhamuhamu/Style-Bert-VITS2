@@ -24,7 +24,7 @@ classifiers = [
 dependencies = [
     "cmudict",
     "cn2an",
-    "e2k",
+    "e2k>=0.6.1",
     "g2p_en",
     "jaconv",
     "jieba",
@@ -199,6 +199,7 @@ ignore = [
     "RUF005",  # collection-literal-concatenation を抑制
     "RUF017",  # quadratic-list-summation を抑制
     "RUF034",  # useless-if-else を抑制
+    "RUF059",  # Unpacked variable `xxx` is never used を抑制
 ]
 
 [tool.ruff.lint.isort]
