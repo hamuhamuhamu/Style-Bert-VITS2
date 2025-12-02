@@ -1,18 +1,15 @@
-# AGENTS.md
+# CLAUDE.md
 
 ## Python 環境セットアップ
 
-このプロジェクトでは `.venv` 仮想環境を使用することを前提としています：
-
+このプロジェクトでは `uv pip install` でのセットアップを前提としています：
 ```bash
-python -m venv .venv
-# Windows
-.venv\Scripts\activate
-# Linux/Mac
-source .venv/bin/activate
+uv venv .venv
+uv pip install "torch<2.9" "torchaudio<2.9" --index-url https://download.pytorch.org/whl/cu126
+uv pip install -r requirements.txt
 ```
 
-以降のコマンドは全て仮想環境内で実行するか、 `.venv/bin/python` を使用してください。
+以降のコマンドは全て `.venv` 以下に作成された仮想環境内で実行するか、 `.venv/bin/python` を使用してください。
 
 ## 開発コマンド
 
