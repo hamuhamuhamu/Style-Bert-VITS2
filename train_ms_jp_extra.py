@@ -29,6 +29,7 @@ import datetime
 import gc
 import os
 import platform
+from typing import Any
 
 import torch
 import torch.distributed as dist
@@ -85,6 +86,210 @@ config = get_config()
 global_step = 0
 
 api = HfApi()
+
+
+class GradientMonitor:
+    """
+    勾配ノルムを監視し、異常検出時に学習率を自動調整するクラス。
+
+    Generator の勾配ノルム (grad_norm_g) の指数移動平均 (EMA) を追跡し、
+    以下の条件で学習率を自動的に減少させる。
+    1. スパイク検出: 現在の grad_norm_g が EMA を大幅に上回った場合
+    2. 持続的高勾配検出: 高い勾配ノルムが複数ステップ連続した場合
+
+    機械学習の専門知識がないユーザーでも、勾配関連の問題に対して
+    手動介入なしで安定した学習を行えるようにすることが目的。
+
+    Args:
+        ema_alpha: EMA 計算の平滑化係数 (0 < alpha <= 1)。
+            値が大きいほど直近の観測値を重視する。
+        spike_threshold: スパイク検出の倍率。
+            現在の grad_norm > spike_threshold * EMA の場合にスパイクと判定。
+        high_grad_threshold: 「高勾配」と判定する絶対閾値。
+            この値を超える勾配は持続的高勾配検出の対象となる。
+        sustained_high_steps: 学習率減少をトリガーするまでの連続高勾配ステップ数。
+        lr_decay_factor: 調整時に学習率に乗じる係数。
+        min_lr: 過度な減少を防ぐための最小学習率。
+        cooldown_steps: 連続した学習率調整間の最小ステップ数。
+    """
+
+    def __init__(
+        self,
+        ema_alpha: float = 0.1,  # EMA 平滑化係数
+        spike_threshold: float = 5.0,  # スパイク検出: 現在値 > 5倍 EMA でトリガー
+        high_grad_threshold: float = 100.0,  # 「高勾配」と判定する閾値
+        sustained_high_steps: int = 50,  # 調整トリガーまでの連続高勾配ステップ数
+        lr_decay_factor: float = 0.5,  # トリガー時に学習率を 50% に減少
+        min_lr: float = 1e-6,  # 最小学習率
+        cooldown_steps: int = 1000,  # 連続調整間のステップ数
+    ):
+        self.ema_alpha = ema_alpha
+        self.spike_threshold = spike_threshold
+        self.high_grad_threshold = high_grad_threshold
+        self.sustained_high_steps = sustained_high_steps
+        self.lr_decay_factor = lr_decay_factor
+        self.min_lr = min_lr
+        self.cooldown_steps = cooldown_steps
+
+        # 内部状態
+        self.ema: float | None = None
+        self.high_count: int = 0
+        self.steps_since_adjustment: int = 0
+        self.total_steps: int = 0
+        self.adjustment_history: list[tuple[int, float, float, str]] = []
+        self.is_enabled: bool = True
+
+    def update(
+        self,
+        grad_norm_g: float,
+        optim_g: torch.optim.Optimizer,
+        scheduler_g: torch.optim.lr_scheduler.LRScheduler,
+        global_step: int,
+    ) -> bool:
+        """
+        新しい勾配ノルムの観測値でモニターを更新し、必要に応じて学習率を調整する。
+
+        Args:
+            grad_norm_g: 現在の Generator 勾配ノルム値。
+            optim_g: 学習率を調整する対象の Generator オプティマイザ。
+            scheduler_g: Generator の学習率スケジューラ。
+                調整時に base_lrs も更新することでエポック境界での上書きを防ぐ。
+            global_step: ログ出力用の現在のグローバル学習ステップ。
+
+        Returns:
+            学習率が調整された場合は True、そうでなければ False。
+        """
+
+        if not self.is_enabled:
+            return False
+
+        self.total_steps += 1
+        self.steps_since_adjustment += 1
+
+        # grad_norm が無効値 (NaN または Inf) の場合はスキップ
+        if not torch.isfinite(torch.tensor(grad_norm_g)):
+            logger.warning(
+                f"[GradientMonitor] Invalid grad_norm_g detected at step {global_step}: {grad_norm_g}. "
+                f"Skipping update. Training may be unstable."
+            )
+            return False
+
+        # 初回ステップで EMA を初期化
+        if self.ema is None:
+            self.ema = grad_norm_g
+            return False
+
+        # EMA を更新
+        old_ema = self.ema
+        self.ema = self.ema_alpha * grad_norm_g + (1 - self.ema_alpha) * self.ema
+
+        # クールダウン期間中かどうかを確認
+        is_in_cooldown = self.steps_since_adjustment < self.cooldown_steps
+
+        # スパイク検出: 現在の grad_norm が EMA を大幅に上回っているか
+        is_spike = grad_norm_g > self.spike_threshold * old_ema and old_ema > 0
+
+        # 持続的高勾配検出のための追跡
+        if grad_norm_g > self.high_grad_threshold:
+            self.high_count += 1
+        else:
+            # 勾配が正常に戻ったらカウンターをリセット
+            self.high_count = 0
+
+        is_sustained_high = self.high_count >= self.sustained_high_steps
+
+        # 学習率調整が必要かどうかを判定
+        is_adjustment_needed = False
+        adjustment_reason = ""
+
+        if is_spike and not is_in_cooldown:
+            is_adjustment_needed = True
+            adjustment_reason = (
+                f"Spike detected: grad_norm_g={grad_norm_g:.2f} is {grad_norm_g / old_ema:.1f}x "
+                f"higher than EMA={old_ema:.2f}"
+            )
+        elif is_sustained_high and not is_in_cooldown:
+            is_adjustment_needed = True
+            adjustment_reason = (
+                f"Sustained high gradients: grad_norm_g > {self.high_grad_threshold} "
+                f"for {self.high_count} consecutive steps"
+            )
+
+        # 学習率調整を適用
+        if is_adjustment_needed:
+            current_lr = optim_g.param_groups[0]["lr"]
+            new_lr = max(current_lr * self.lr_decay_factor, self.min_lr)
+
+            if new_lr >= current_lr:
+                # 学習率が既に最小値なので調整不可
+                logger.warning(
+                    f"[GradientMonitor] Step {global_step}: {adjustment_reason}, "
+                    f"but learning rate is already at minimum ({current_lr:.2e}). "
+                    f"Consider stopping training or adjusting hyperparameters."
+                )
+                return False
+
+            # 新しい学習率を適用
+            for param_group in optim_g.param_groups:
+                param_group["lr"] = new_lr
+
+            # スケジューラの base_lrs も同じ比率で減少させる
+            # これによりエポック境界での scheduler.step() による上書きを防ぐ
+            for i in range(len(scheduler_g.base_lrs)):
+                scheduler_g.base_lrs[i] *= self.lr_decay_factor
+
+            # 調整履歴を記録
+            self.adjustment_history.append(
+                (global_step, current_lr, new_lr, adjustment_reason)
+            )
+            self.steps_since_adjustment = 0
+            self.high_count = 0
+
+            logger.warning(
+                f"[GradientMonitor] Step {global_step}: Learning rate automatically reduced. "
+                f"{adjustment_reason}. "
+                f"LR: {current_lr:.2e} -> {new_lr:.2e}"
+            )
+
+            return True
+
+        return False
+
+    def get_state_dict(self) -> dict[str, Any]:
+        """
+        チェックポイント保存用に現在の状態を取得する。
+
+        Returns:
+            モニターを復元するために必要な全ての状態変数を含む辞書。
+        """
+
+        return {
+            "ema": self.ema,
+            "high_count": self.high_count,
+            "steps_since_adjustment": self.steps_since_adjustment,
+            "total_steps": self.total_steps,
+            "adjustment_history": self.adjustment_history,
+            "is_enabled": self.is_enabled,
+        }
+
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        """
+        チェックポイントから状態を復元する。
+
+        Args:
+            state_dict: 以前のチェックポイントからの状態変数を含む辞書。
+        """
+
+        self.ema = state_dict.get("ema", None)
+        self.high_count = state_dict.get("high_count", 0)
+        self.steps_since_adjustment = state_dict.get("steps_since_adjustment", 0)
+        self.total_steps = state_dict.get("total_steps", 0)
+        self.adjustment_history = state_dict.get("adjustment_history", [])
+        self.is_enabled = state_dict.get("is_enabled", True)
+
+
+# グローバル勾配モニターインスタンス (分散学習との互換性のため run() 内で初期化)
+gradient_monitor: GradientMonitor | None = None
 
 
 def run():
@@ -612,6 +817,18 @@ def run():
         )
     initial_step = global_step
 
+    # 自動学習率調整用の勾配モニターを初期化
+    # 分散学習時は各 GPU 間での学習率同期が複雑になるため無効化
+    global gradient_monitor
+    if n_gpus > 1:
+        gradient_monitor = None
+        logger.info(
+            "[GradientMonitor] Disabled (distributed training with multiple GPUs detected)."
+        )
+    else:
+        gradient_monitor = GradientMonitor()
+        logger.info("[GradientMonitor] Automatic learning rate adjustment enabled.")
+
     for epoch in range(epoch_str, hps.train.epochs + 1):
         if rank == 0:
             train_and_evaluate(
@@ -970,6 +1187,11 @@ def train_and_evaluate(
         grad_norm_g = commons.clip_grad_value_(net_g.parameters(), None)
         scaler.step(optim_g)
         scaler.update()
+
+        # 勾配ノルムに基づく自動学習率調整
+        # 分散学習での競合を避けるため、rank 0 のみがモニタリングと調整を行う
+        if rank == 0 and gradient_monitor is not None:
+            gradient_monitor.update(grad_norm_g, optim_g, scheduler_g, global_step)
 
         if rank == 0:
             if global_step % hps.train.log_interval == 0 and not hps.speedup:
