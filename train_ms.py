@@ -305,6 +305,8 @@ def run():
             0.1,
             gin_channels=hps.model.gin_channels if hps.data.n_speakers != 0 else 0,
         ).cuda(local_rank)
+    else:
+        net_dur_disc = None
     if hps.model.use_spk_conditioned_encoder is True:
         if hps.data.n_speakers == 0:
             raise ValueError(
@@ -395,6 +397,9 @@ def run():
     net_d = DDP(net_d, device_ids=[local_rank])
     dur_resume_lr = None
     if net_dur_disc is not None:
+        # NOTE: gin_channels != 0 (マルチスピーカー) 時、self.cond 層が作成されるが
+        # forward 時に g を渡していないため未使用パラメータとなる
+        # DDP でエラーを回避するため find_unused_parameters=True が必要
         net_dur_disc = DDP(
             net_dur_disc, device_ids=[local_rank], find_unused_parameters=True
         )
@@ -623,6 +628,7 @@ def train_and_evaluate(
     if writers is not None:
         writer, writer_eval = writers
 
+    # DistributedBucketSampler でエポックごとに異なるシャッフルを行う
     train_loader.batch_sampler.set_epoch(epoch)
     global global_step
 
@@ -795,8 +801,9 @@ def train_and_evaluate(
         optim_g.zero_grad()
         scaler.scale(loss_gen_all).backward()
         scaler.unscale_(optim_g)
-        if getattr(hps.train, "bf16_run", False):
-            torch.nn.utils.clip_grad_norm_(parameters=net_g.parameters(), max_norm=500)
+        # if getattr(hps.train, "bf16_run", False):
+        # 勾配爆発を防ぐため、常に勾配クリッピングを適用
+        torch.nn.utils.clip_grad_norm_(parameters=net_g.parameters(), max_norm=500)
         grad_norm_g = commons.clip_grad_value_(net_g.parameters(), None)
         scaler.step(optim_g)
         scaler.update()

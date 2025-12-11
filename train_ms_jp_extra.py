@@ -744,6 +744,7 @@ def train_and_evaluate(
     if writers is not None:
         writer, writer_eval = writers
 
+    # DistributedBucketSampler でエポックごとに異なるシャッフルを行わない
     # train_loader.batch_sampler.set_epoch(epoch)
     global global_step
 
@@ -964,6 +965,7 @@ def train_and_evaluate(
         scaler.scale(loss_gen_all).backward()
         scaler.unscale_(optim_g)
         # if getattr(hps.train, "bf16_run", False):
+        # 勾配爆発を防ぐため、常に勾配クリッピングを適用
         torch.nn.utils.clip_grad_norm_(parameters=net_g.parameters(), max_norm=500)
         grad_norm_g = commons.clip_grad_value_(net_g.parameters(), None)
         scaler.step(optim_g)
