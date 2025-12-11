@@ -7,7 +7,7 @@ import platform
 import torch
 import torch.distributed as dist
 from huggingface_hub import HfApi
-from torch.cuda.amp import GradScaler, autocast
+from torch.amp import GradScaler, autocast
 from torch.nn import functional as F
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
@@ -37,16 +37,21 @@ from style_bert_vits2.nlp.symbols import SYMBOLS
 from style_bert_vits2.utils.stdout_wrapper import SAFE_STDOUT
 
 
+# PyTorch 最適化設定 (torch >= 2.1 前提)
+# TF32: Ampere 以降の GPU で FP32 演算を高速化
 torch.backends.cuda.matmul.allow_tf32 = True
-torch.backends.cudnn.allow_tf32 = (
-    True  # If encontered training problem,please try to disable TF32.
-)
+# If encountered training problem, please try to disable TF32.
+torch.backends.cudnn.allow_tf32 = True
+# 行列演算精度: "medium" は TF32 を使用し、速度と精度のバランスを取る
 torch.set_float32_matmul_precision("medium")
-torch.backends.cuda.sdp_kernel("flash")
+# cuDNN ベンチマーク: 固定入力サイズの学習で畳み込みアルゴリズムを自動選択し高速化
+torch.backends.cudnn.benchmark = True
+# Scaled Dot-Product Attention (SDPA) バックエンド設定
+# Flash Attention: 最も高速だがハードウェア要件あり (Ampere 以降)
 torch.backends.cuda.enable_flash_sdp(True)
-torch.backends.cuda.enable_mem_efficient_sdp(
-    True
-)  # Not available if torch version is lower than 2.0
+# Memory Efficient Attention: Flash が使えない場合のフォールバック
+torch.backends.cuda.enable_mem_efficient_sdp(True)
+# Math Attention: 上記が使えない場合の最終フォールバック
 torch.backends.cuda.enable_math_sdp(True)
 
 config = get_config()
@@ -192,6 +197,7 @@ def run():
             folder_path=config.dataset_path,
             path_in_repo=f"Data/{config.model_name}",
             delete_patterns="*.pth",  # Only keep the latest checkpoint
+            ignore_patterns=f"{config.dataset_path}/raw",  # Ignore raw data
             run_as_future=True,
         )
 
@@ -265,6 +271,10 @@ def run():
             # これもメモリ消費量を減らそうとしてコメントアウト
             # prefetch_factor=6,
         )
+        logger.info("Using DistributedLengthGroupedSampler for training.")
+        logger.debug(f"len(train_dataset): {len(train_dataset)}")
+        logger.debug(f"len(train_loader): {len(train_loader)}")
+
     eval_dataset = None
     eval_loader = None
     if rank == 0 and not args.speedup:
@@ -472,7 +482,10 @@ def run():
         )
     else:
         scheduler_dur_disc = None
-    scaler = GradScaler(enabled=hps.train.bf16_run)
+    # NOTE: GradScaler は本来 FP16 (AMP) 用であり、BF16 では不要
+    ## BF16 は FP32 と同じ動的レンジを持つため、勾配スケーリングは必要ない
+    ## ただし、enabled=False で初期化すれば害はないため、現状維持としている
+    scaler = GradScaler(device="cuda", enabled=hps.train.bf16_run)
     logger.info("Start training.")
 
     diff = abs(
@@ -569,6 +582,7 @@ def run():
                     folder_path=config.dataset_path,
                     path_in_repo=f"Data/{config.model_name}",
                     delete_patterns="*.pth",  # Only keep the latest checkpoint
+                    ignore_patterns=f"{config.dataset_path}/raw",  # Ignore raw data
                     run_as_future=True,
                 )
                 future2 = api.upload_folder(
@@ -657,7 +671,11 @@ def train_and_evaluate(
         en_bert = en_bert.cuda(local_rank, non_blocking=True)
         style_vec = style_vec.cuda(local_rank, non_blocking=True)
 
-        with autocast(enabled=hps.train.bf16_run, dtype=torch.bfloat16):
+        with autocast(
+            device_type="cuda",
+            enabled=hps.train.bf16_run,
+            dtype=torch.bfloat16,
+        ):
             (
                 y_hat,
                 l_length,
@@ -708,16 +726,27 @@ def train_and_evaluate(
 
             # Discriminator
             y_d_hat_r, y_d_hat_g, _, _ = net_d(y, y_hat.detach())
-            with autocast(enabled=hps.train.bf16_run, dtype=torch.bfloat16):
+            with autocast(
+                device_type="cuda",
+                enabled=hps.train.bf16_run,
+                dtype=torch.bfloat16,
+            ):
                 loss_disc, losses_disc_r, losses_disc_g = discriminator_loss(
                     y_d_hat_r, y_d_hat_g
                 )
                 loss_disc_all = loss_disc
             if net_dur_disc is not None:
                 y_dur_hat_r, y_dur_hat_g = net_dur_disc(
-                    hidden_x.detach(), x_mask.detach(), logw.detach(), logw_.detach()
+                    hidden_x.detach(),
+                    x_mask.detach(),
+                    logw.detach(),
+                    logw_.detach(),
                 )
-                with autocast(enabled=hps.train.bf16_run, dtype=torch.bfloat16):
+                with autocast(
+                    device_type="cuda",
+                    enabled=hps.train.bf16_run,
+                    dtype=torch.bfloat16,
+                ):
                     # TODO: I think need to mean using the mask, but for now, just mean all
                     (
                         loss_dur_disc,
@@ -739,12 +768,20 @@ def train_and_evaluate(
         grad_norm_d = commons.clip_grad_value_(net_d.parameters(), None)
         scaler.step(optim_d)
 
-        with autocast(enabled=hps.train.bf16_run, dtype=torch.bfloat16):
+        with autocast(
+            device_type="cuda",
+            enabled=hps.train.bf16_run,
+            dtype=torch.bfloat16,
+        ):
             # Generator
             y_d_hat_r, y_d_hat_g, fmap_r, fmap_g = net_d(y, y_hat)
             if net_dur_disc is not None:
                 y_dur_hat_r, y_dur_hat_g = net_dur_disc(hidden_x, x_mask, logw, logw_)
-            with autocast(enabled=hps.train.bf16_run, dtype=torch.bfloat16):
+            with autocast(
+                device_type="cuda",
+                enabled=hps.train.bf16_run,
+                dtype=torch.bfloat16,
+            ):
                 loss_dur = torch.sum(l_length.float())
                 loss_mel = F.l1_loss(y_mel, y_hat_mel) * hps.train.c_mel
                 loss_kl = kl_loss(z_p, logs_q, m_p, logs_p, z_mask) * hps.train.c_kl
@@ -872,6 +909,7 @@ def train_and_evaluate(
                         folder_path=config.dataset_path,
                         path_in_repo=f"Data/{config.model_name}",
                         delete_patterns="*.pth",  # Only keep the latest checkpoint
+                        ignore_patterns=f"{config.dataset_path}/raw",  # Ignore raw data
                         run_as_future=True,
                     )
                     api.upload_folder(

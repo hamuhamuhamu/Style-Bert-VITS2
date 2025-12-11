@@ -1,3 +1,29 @@
+"""
+# 既知の問題点・バグ
+---------------------------------------------------------------------------
+## WavLM Discriminator の Generator 側損失が使用されない問題
+オリジナル Bert-VITS2 の JP-Extra 版から存在するバグ。
+WavLM Discriminator の損失（loss_lm, loss_lm_gen）を計算しても、Generator の学習に反映されない。
+Duration Discriminator を意図的に無効化した際に、WavLM 損失の条件分岐が連動して無効になることが見落とされていたと推測される。
+現在の事前学習モデルのベースである Bert-VITS2 時代からこの状態で学習されていたと思われる。
+
+原因は、WavLM 損失を loss_gen_all に加算する処理が、
+Duration Discriminator の条件分岐 `if net_dur_disc is not None:` の内部にネストされていること。
+JP-Extra のデフォルト設定では `use_duration_discriminator: false` のため、
+この条件分岐に入らず、WavLM 損失が計算されても使用されない。
+
+これにより、WavLM モデルのロード、forward pass、損失計算がすべて無駄になり、
+数百 MB のメモリと計算時間を消費するにもかかわらず、学習に一切寄与しない状態だった。
+また TensorBoard には loss_lm, loss_lm_gen が記録されるが、実際には使われていなかった。
+
+このコードでは、デフォルト設定で `use_wavlm_discriminator: false` に変更し、
+WavLM 関連のリソース消費を削減した。
+Generator の学習結果は従来と完全に等価である（どちらも WavLM 損失は使われない）。
+
+将来的に WavLM 損失を正しく使用したい場合は、WavLM 損失の加算を Duration Discriminator の条件分岐から独立させる必要がある。
+ただし、既存の事前学習モデルは WavLM 損失なしで学習されているため、ファインチューニング時に有効化すると学習が不安定になる可能性がある。
+"""
+
 import argparse
 import datetime
 import gc
@@ -7,7 +33,7 @@ import platform
 import torch
 import torch.distributed as dist
 from huggingface_hub import HfApi
-from torch.cuda.amp import GradScaler, autocast
+from torch.amp import GradScaler, autocast
 from torch.nn import functional as F
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
@@ -38,17 +64,22 @@ from style_bert_vits2.nlp.symbols import SYMBOLS
 from style_bert_vits2.utils.stdout_wrapper import SAFE_STDOUT
 
 
+# PyTorch 最適化設定 (torch >= 2.1 前提)
+# TF32: Ampere 以降の GPU で FP32 演算を高速化
 torch.backends.cuda.matmul.allow_tf32 = True
-torch.backends.cudnn.allow_tf32 = (
-    True  # If encontered training problem,please try to disable TF32.
-)
-torch.set_num_threads(1)
+# If encountered training problem, please try to disable TF32.
+torch.backends.cudnn.allow_tf32 = True
+# 行列演算精度: "medium" は TF32 を使用し、速度と精度のバランスを取る
 torch.set_float32_matmul_precision("medium")
-torch.backends.cuda.sdp_kernel("flash")
+# cuDNN ベンチマーク: 固定入力サイズの学習で畳み込みアルゴリズムを自動選択し高速化
+torch.backends.cudnn.benchmark = True
+# Scaled Dot-Product Attention (SDPA) バックエンド設定
+# Flash Attention: 最も高速だがハードウェア要件あり (Ampere 以降)
 torch.backends.cuda.enable_flash_sdp(True)
-torch.backends.cuda.enable_mem_efficient_sdp(
-    True
-)  # Not available if torch version is lower than 2.0
+# Memory Efficient Attention: Flash が使えない場合のフォールバック
+torch.backends.cuda.enable_mem_efficient_sdp(True)
+# Math Attention: 上記が使えない場合の最終フォールバック
+torch.backends.cuda.enable_math_sdp(True)
 
 config = get_config()
 global_step = 0
@@ -140,7 +171,7 @@ def run():
     n_gpus = dist.get_world_size()
 
     hps = HyperParameters.load_from_json(args.config)
-    # This is needed because we have to pass values to `train_and_evaluate()
+    # This is needed because we have to pass values to `train_and_evaluate()`
     hps.model_dir = model_dir
     hps.speedup = args.speedup
     hps.repo_id = args.repo_id
@@ -196,6 +227,7 @@ def run():
             ignore_patterns=f"{config.dataset_path}/raw",  # Ignore raw data
             run_as_future=True,
         )
+
     os.makedirs(config.out_dir, exist_ok=True)
 
     if not args.skip_default_style:
@@ -347,10 +379,12 @@ def run():
         gin_channels=hps.model.gin_channels,
         slm=hps.model.slm,
     ).cuda(local_rank)
+
     if getattr(hps.train, "freeze_JP_bert", False):
         logger.info("Freezing (JP) bert encoder !!!")
         for param in net_g.enc_p.bert_proj.parameters():
             param.requires_grad = False
+
     if getattr(hps.train, "freeze_style", False):
         logger.info("Freezing style encoder !!!")
         for param in net_g.enc_p.style_proj.parameters():
@@ -417,6 +451,8 @@ def run():
 
     if utils.is_resuming(model_dir):
         if net_dur_disc is not None:
+            # チェックポイントが見つからない場合のデフォルト学習率
+            dur_resume_lr = hps.train.learning_rate
             try:
                 _, _, dur_resume_lr, epoch_str = utils.checkpoints.load_checkpoint(
                     utils.checkpoints.get_latest_checkpoint_path(
@@ -428,11 +464,15 @@ def run():
                 )
                 if not optim_dur_disc.param_groups[0].get("initial_lr"):
                     optim_dur_disc.param_groups[0]["initial_lr"] = dur_resume_lr
-            except:
+            except Exception as ex:
+                # チェックポイントのロードに失敗した場合、デフォルト学習率で初期化
+                logger.warning(f"Failed to load DUR checkpoint: {ex}")
                 if not optim_dur_disc.param_groups[0].get("initial_lr"):
                     optim_dur_disc.param_groups[0]["initial_lr"] = dur_resume_lr
-                print("Initialize dur_disc")
+                logger.info("Initialize dur_disc with default learning rate")
         if net_wd is not None:
+            # チェックポイントが見つからない場合のデフォルト学習率
+            wd_resume_lr = hps.train.learning_rate
             try:
                 _, optim_wd, wd_resume_lr, epoch_str = (
                     utils.checkpoints.load_checkpoint(
@@ -446,10 +486,12 @@ def run():
                 )
                 if not optim_wd.param_groups[0].get("initial_lr"):
                     optim_wd.param_groups[0]["initial_lr"] = wd_resume_lr
-            except:
+            except Exception as ex:
+                # チェックポイントのロードに失敗した場合、デフォルト学習率で初期化
+                logger.warning(f"Failed to load WD checkpoint: {ex}")
                 if not optim_wd.param_groups[0].get("initial_lr"):
                     optim_wd.param_groups[0]["initial_lr"] = wd_resume_lr
-                logger.info("Initialize wavlm")
+                logger.info("Initialize wavlm with default learning rate")
 
         try:
             _, optim_g, g_resume_lr, epoch_str = utils.checkpoints.load_checkpoint(
@@ -549,7 +591,11 @@ def run():
     else:
         scheduler_wd = None
         wl = None
-    scaler = GradScaler(enabled=hps.train.bf16_run)
+
+    # NOTE: GradScaler は本来 FP16 (AMP) 用であり、BF16 では不要
+    ## BF16 は FP32 と同じ動的レンジを持つため、勾配スケーリングは必要ない
+    ## ただし、enabled=False で初期化すれば害はないため、現状維持としている
+    scaler = GradScaler(device="cuda", enabled=hps.train.bf16_run)
     logger.info("Start training.")
 
     diff = abs(
@@ -605,6 +651,7 @@ def run():
             scheduler_dur_disc.step()
         if net_wd is not None:
             scheduler_wd.step()
+
         if epoch == hps.train.epochs:
             # Save the final models
             assert optim_g is not None
@@ -679,7 +726,7 @@ def train_and_evaluate(
     rank,
     local_rank,
     epoch,
-    hps,
+    hps: HyperParameters,
     nets,
     optims,
     schedulers,
@@ -743,7 +790,11 @@ def train_and_evaluate(
         bert = bert.cuda(local_rank, non_blocking=True)
         style_vec = style_vec.cuda(local_rank, non_blocking=True)
 
-        with autocast(enabled=hps.train.bf16_run, dtype=torch.bfloat16):
+        with autocast(
+            device_type="cuda",
+            enabled=hps.train.bf16_run,
+            dtype=torch.bfloat16,
+        ):
             (
                 y_hat,
                 l_length,
@@ -793,7 +844,11 @@ def train_and_evaluate(
 
             # Discriminator
             y_d_hat_r, y_d_hat_g, _, _ = net_d(y, y_hat.detach())
-            with autocast(enabled=hps.train.bf16_run, dtype=torch.bfloat16):
+            with autocast(
+                device_type="cuda",
+                enabled=hps.train.bf16_run,
+                dtype=torch.bfloat16,
+            ):
                 loss_disc, losses_disc_r, losses_disc_g = discriminator_loss(
                     y_d_hat_r, y_d_hat_g
                 )
@@ -806,7 +861,11 @@ def train_and_evaluate(
                     logw.detach(),
                     g.detach(),
                 )
-                with autocast(enabled=hps.train.bf16_run, dtype=torch.bfloat16):
+                with autocast(
+                    device_type="cuda",
+                    enabled=hps.train.bf16_run,
+                    dtype=torch.bfloat16,
+                ):
                     # TODO: I think need to mean using the mask, but for now, just mean all
                     (
                         loss_dur_disc,
@@ -827,7 +886,11 @@ def train_and_evaluate(
             if net_wd is not None:
                 # logger.debug(f"y.shape: {y.shape}, y_hat.shape: {y_hat.shape}")
                 # shape: (batch, 1, time)
-                with autocast(enabled=hps.train.bf16_run, dtype=torch.bfloat16):
+                with autocast(
+                    device_type="cuda",
+                    enabled=hps.train.bf16_run,
+                    dtype=torch.bfloat16,
+                ):
                     loss_slm = wl.discriminator(
                         y.detach().squeeze(1), y_hat.detach().squeeze(1)
                     ).mean()
@@ -847,7 +910,11 @@ def train_and_evaluate(
         grad_norm_d = commons.clip_grad_value_(net_d.parameters(), None)
         scaler.step(optim_d)
 
-        with autocast(enabled=hps.train.bf16_run, dtype=torch.bfloat16):
+        with autocast(
+            device_type="cuda",
+            enabled=hps.train.bf16_run,
+            dtype=torch.bfloat16,
+        ):
             # Generator
             y_d_hat_r, y_d_hat_g, fmap_r, fmap_g = net_d(y, y_hat)
             if net_dur_disc is not None:
@@ -855,22 +922,44 @@ def train_and_evaluate(
             if net_wd is not None:
                 loss_lm = wl(y.detach().squeeze(1), y_hat.squeeze(1)).mean()
                 loss_lm_gen = wl.generator(y_hat.squeeze(1))
-            with autocast(enabled=hps.train.bf16_run, dtype=torch.bfloat16):
+            with autocast(
+                device_type="cuda",
+                enabled=hps.train.bf16_run,
+                dtype=torch.bfloat16,
+            ):
                 loss_dur = torch.sum(l_length.float())
                 loss_mel = F.l1_loss(y_mel, y_hat_mel) * hps.train.c_mel
                 loss_kl = kl_loss(z_p, logs_q, m_p, logs_p, z_mask) * hps.train.c_kl
 
                 loss_fm = feature_loss(fmap_r, fmap_g)
                 loss_gen, losses_gen = generator_loss(y_d_hat_g)
+                # NOTE: loss_commit は JP-Extra 版では使用されておらず、config.json の "c_commit": 100 は参照されない
+                ## オリジナル Bert-VITS2 では VQ (Vector Quantization) のコミットメント損失として
+                ## 使用されていたが、JP-Extra 版では VQ が削除されたため不要になった
                 # loss_commit = loss_commit * hps.train.c_commit
 
                 loss_gen_all = loss_gen + loss_fm + loss_mel + loss_dur + loss_kl
+
+                # Duration Discriminator の損失を追加
                 if net_dur_disc is not None:
                     loss_dur_gen, losses_dur_gen = generator_loss(y_dur_hat_g)
-                    if net_wd is not None:
-                        loss_gen_all += loss_dur_gen + loss_lm + loss_lm_gen
-                    else:
-                        loss_gen_all += loss_dur_gen
+                    loss_gen_all += loss_dur_gen
+
+                # ======================================================================
+                ## オリジナルの Bert-VITS2 JP-Extra では、WavLM 損失 (loss_lm, loss_lm_gen) の
+                ## 加算が Duration Discriminator の条件分岐の内部にネストされていた。
+                ## 一方 JP-Extra 版のデフォルトハイパラは use_duration_discriminator: false のため、
+                ## WavLM 損失が計算されても loss_gen_all には加算されない状態になっていた。
+                ## このコードでは、WavLM 損失と Duration Discriminator 損失を独立して処理するため、
+                ## Duration Discriminator / WavLM Discriminator を個別に有効/無効化できるようになっている。
+                ## なお、事前学習モデルの Generator は WavLM 損失を使用せずに学習されてしまっていたと考えられるため、
+                ## 現在のデフォルトハイパラでは use_wavlm_discriminator: false としている。そのため、この修正は実質的に影響しない。
+                ## 将来的に WavLM 損失を有効化したモデルを学習する場合に、初めてこの修正が機能するようになる。
+                # ======================================================================
+                # WavLM Discriminator の損失を追加 (Duration Discriminator の有無に関係なく)
+                if net_wd is not None:
+                    loss_gen_all += loss_lm + loss_lm_gen
+
         optim_g.zero_grad()
         scaler.scale(loss_gen_all).backward()
         scaler.unscale_(optim_g)
@@ -935,6 +1024,8 @@ def train_and_evaluate(
                         {f"loss/g/dur_gen_{i}": v for i, v in enumerate(losses_dur_gen)}
                     )
 
+                # NOTE: 現在のコードでは、ここでログに記録される損失は実際に loss_gen_all に加算されて学習に使用されるようになっている
+                ## 修正前は loss_lm, loss_lm_gen がログには表示されるが学習には使われない状態だった
                 if net_wd is not None:
                     scalar_dict.update(
                         {
@@ -973,6 +1064,7 @@ def train_and_evaluate(
             ):
                 if not hps.speedup:
                     evaluate(hps, net_g, eval_loader, writer_eval)
+                assert hps.model_dir is not None
                 utils.checkpoints.save_checkpoint(
                     net_g,
                     optim_g,
@@ -1042,7 +1134,8 @@ def train_and_evaluate(
                 f"Epoch {epoch}({100.0 * batch_idx / len(train_loader):.0f}%)/{hps.train.epochs}"
             )
             pbar.update()
-
+    # 本家ではこれをスピードアップのために消すと書かれていたので、一応消してみる
+    # と思ったけどメモリ使用量が減るかもしれないのでつけてみる
     gc.collect()
     torch.cuda.empty_cache()
     if pbar is None and rank == 0:

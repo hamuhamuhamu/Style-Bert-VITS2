@@ -47,7 +47,7 @@
     "use_noise_scaled_mas": true,
     "use_mel_posterior_encoder": false,
     "use_duration_discriminator": false,
-    "use_wavlm_discriminator": true,
+    "use_wavlm_discriminator": false,
     "inter_channels": 192,
     "hidden_channels": 192,
     "filter_channels": 768,
