@@ -382,11 +382,67 @@ class DistributedBucketSampler(torch.utils.data.distributed.DistributedSampler):
 
     def _create_buckets(self):
         buckets = [[] for _ in range(len(self.boundaries) - 1)]
+        excluded_too_short = []
+        excluded_too_long = []
+
         for i in range(len(self.lengths)):
             length = self.lengths[i]
             idx_bucket = self._bisect(length)
             if idx_bucket != -1:
                 buckets[idx_bucket].append(i)
+            elif length <= self.boundaries[0]:
+                excluded_too_short.append((i, length))
+            else:
+                excluded_too_long.append((i, length))
+
+        # 除外されたサンプルについて警告を出す
+        # boundaries のフレーム数を秒数に変換（hop_length=512, sampling_rate=44100 を仮定）
+        ## 実際の値は config に依存するが、ここでは一般的な値を使用
+        hop_length = 512
+        sampling_rate = 44100
+        min_frames = self.boundaries[0]
+        max_frames = self.boundaries[-1]
+        min_sec = min_frames * hop_length / sampling_rate
+        max_sec = max_frames * hop_length / sampling_rate
+
+        if excluded_too_short:
+            logger.warning(
+                f"{len(excluded_too_short)} samples were excluded from training "
+                f"(too short: <= {min_frames} frames, ~{min_sec:.2f} sec). "
+                f"Consider removing or extending these audio files."
+            )
+            # 最初の5件を例示
+            for idx, length in excluded_too_short[:5]:
+                sec = length * hop_length / sampling_rate
+                logger.warning(
+                    f"  - Sample index {idx}: {length} frames (~{sec:.2f} sec)"
+                )
+            if len(excluded_too_short) > 5:
+                logger.warning(f"  ... and {len(excluded_too_short) - 5} more")
+
+        if excluded_too_long:
+            logger.warning(
+                f"{len(excluded_too_long)} samples were excluded from training "
+                f"(too long: > {max_frames} frames, ~{max_sec:.2f} sec). "
+                f"Consider splitting these audio files or using --not_use_custom_batch_sampler option."
+            )
+            # 最初の5件を例示
+            for idx, length in excluded_too_long[:5]:
+                sec = length * hop_length / sampling_rate
+                logger.warning(
+                    f"  - Sample index {idx}: {length} frames (~{sec:.2f} sec)"
+                )
+            if len(excluded_too_long) > 5:
+                logger.warning(f"  ... and {len(excluded_too_long) - 5} more")
+
+        total_excluded = len(excluded_too_short) + len(excluded_too_long)
+        total_samples = len(self.lengths)
+        if total_excluded > 0:
+            included = total_samples - total_excluded
+            logger.info(
+                f"Bucket sampler: {included}/{total_samples} samples will be used for training "
+                f"({total_excluded} excluded, {100 * total_excluded / total_samples:.1f}%)"
+            )
 
         try:
             for i in range(len(buckets) - 1, 0, -1):
