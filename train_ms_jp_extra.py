@@ -25,6 +25,7 @@ Generator の学習結果は従来と完全に等価である（どちらも Wav
 """
 
 import argparse
+import copy
 import datetime
 import gc
 import os
@@ -255,7 +256,7 @@ class GradientMonitor:
 
         return False
 
-    def get_state_dict(self) -> dict[str, Any]:
+    def state_dict(self) -> dict[str, Any]:
         """
         チェックポイント保存用に現在の状態を取得する。
 
@@ -288,8 +289,108 @@ class GradientMonitor:
         self.is_enabled = state_dict.get("is_enabled", True)
 
 
+class EMAModel:
+    """
+    モデル重みの指数移動平均 (Exponential Moving Average) を管理するクラス。
+
+    学習中のモデル重みは勾配更新により振動するが、EMA はその平滑化されたバージョンを保持する。
+    推論時に EMA 重みを使用することで、より安定した出力が得られる傾向がある。
+
+    使い方:
+        1. 学習開始時に EMAModel を初期化
+        2. 各オプティマイザステップ後に update() を呼び出し
+        3. チェックポイント保存時に get_ema_model() で EMA モデルを取得して保存
+
+    Args:
+        model: EMA を適用する対象モデル (通常は Generator)
+        decay: EMA の減衰率 (0.999 が一般的)。
+            値が大きいほど過去の重みを重視し、より滑らかになる。
+        device: EMA モデルを配置するデバイス
+    """
+
+    def __init__(
+        self,
+        model: torch.nn.Module,
+        decay: float = 0.999,  # 減衰率: 0.999 が一般的な値
+        device: torch.device | None = None,
+    ):
+        self.decay = decay
+        self.device = device
+
+        # モデルの深いコピーを作成して EMA 用の重みを保持
+        # DDP の場合は .module を使用して内部モデルを取得
+        if hasattr(model, "module"):
+            self.ema_model = copy.deepcopy(model.module)
+        else:
+            self.ema_model = copy.deepcopy(model)
+
+        # EMA モデルは学習しないので勾配計算を無効化
+        self.ema_model.eval()
+        for param in self.ema_model.parameters():
+            param.requires_grad_(False)
+
+        if device is not None:
+            self.ema_model.to(device)
+
+    @torch.no_grad()
+    def update(self, model: torch.nn.Module) -> None:
+        """
+        現在のモデル重みで EMA を更新する。
+
+        各オプティマイザステップ後に呼び出すこと。
+        EMA 更新式: ema_weight = decay * ema_weight + (1 - decay) * current_weight
+
+        Args:
+            model: 現在の学習中モデル
+        """
+
+        # DDP の場合は .module を使用
+        source_model = model.module if hasattr(model, "module") else model
+
+        for ema_param, param in zip(
+            self.ema_model.parameters(),
+            source_model.parameters(),
+        ):
+            # EMA 更新: ema = decay * ema + (1 - decay) * current
+            ema_param.data.mul_(self.decay).add_(param.data, alpha=1.0 - self.decay)
+
+    def get_ema_model(self) -> torch.nn.Module:
+        """
+        EMA モデルを取得する。
+
+        チェックポイント保存時や推論時に使用。
+
+        Returns:
+            EMA 重みを持つモデル
+        """
+
+        return self.ema_model
+
+    def state_dict(self) -> dict[str, Any]:
+        """
+        EMA モデルの状態辞書を取得する。
+
+        Returns:
+            EMA モデルの状態辞書
+        """
+
+        return self.ema_model.state_dict()
+
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        """
+        EMA モデルの状態を復元する。
+
+        Args:
+            state_dict: 以前のチェックポイントからの状態変数を含む辞書。
+        """
+
+        self.ema_model.load_state_dict(state_dict)
+
+
 # グローバル勾配モニターインスタンス (分散学習との互換性のため run() 内で初期化)
 gradient_monitor: GradientMonitor | None = None
+# グローバル EMA インスタンス
+ema_model: EMAModel | None = None
 
 
 def run():
@@ -339,6 +440,25 @@ def run():
         "--not_use_custom_batch_sampler",
         help="Don't use custom batch sampler for training, which was used in the version < 2.5",
         action="store_true",
+    )
+    parser.add_argument(
+        "--use_ema",
+        action="store_true",
+        help="Use Exponential Moving Average (EMA) for model weights. "
+        "EMA weights are smoother and often produce more stable inference results.",
+    )
+    parser.add_argument(
+        "--ema_decay",
+        type=float,
+        default=0.999,
+        help="EMA decay rate. Higher values (e.g., 0.9999) produce smoother weights. Default: 0.999",
+    )
+    parser.add_argument(
+        "--gradient_accumulation_steps",
+        type=int,
+        default=1,
+        help="Number of steps to accumulate gradients before updating weights. "
+        "Effective batch size = batch_size * gradient_accumulation_steps. Default: 1 (no accumulation)",
     )
     args = parser.parse_args()
 
@@ -829,6 +949,25 @@ def run():
         gradient_monitor = GradientMonitor()
         logger.info("[GradientMonitor] Automatic learning rate adjustment enabled.")
 
+    # EMA (Exponential Moving Average) の初期化
+    # 推論時により安定した出力を得るために、モデル重みの移動平均を保持
+    global ema_model
+    if args.use_ema:
+        ema_model = EMAModel(net_g, decay=args.ema_decay)
+        logger.info(
+            f"[EMA] Enabled with decay={args.ema_decay}. EMA weights will be saved for inference."
+        )
+    else:
+        ema_model = None
+
+    # 勾配累積のログ出力
+    if args.gradient_accumulation_steps > 1:
+        effective_batch_size = hps.train.batch_size * args.gradient_accumulation_steps
+        logger.info(
+            f"[GradientAccumulation] Enabled with {args.gradient_accumulation_steps} steps. "
+            f"Effective batch size: {hps.train.batch_size} x {args.gradient_accumulation_steps} = {effective_batch_size}"
+        )
+
     for epoch in range(epoch_str, hps.train.epochs + 1):
         if rank == 0:
             train_and_evaluate(
@@ -845,6 +984,7 @@ def run():
                 [writer, writer_eval],
                 pbar,
                 initial_step,
+                args.gradient_accumulation_steps,
             )
         else:
             train_and_evaluate(
@@ -861,6 +1001,7 @@ def run():
                 None,
                 pbar,
                 initial_step,
+                args.gradient_accumulation_steps,
             )
         scheduler_g.step()
         scheduler_d.step()
@@ -905,8 +1046,12 @@ def run():
                     epoch,
                     os.path.join(model_dir, f"WD_{global_step}.pth"),
                 )
+            # EMA が有効な場合は EMA 重みを保存
+            model_to_save = (
+                ema_model.get_ema_model() if ema_model is not None else net_g
+            )
             utils.safetensors.save_safetensors(
-                net_g,
+                model_to_save,
                 epoch,
                 os.path.join(
                     config.out_dir,
@@ -953,6 +1098,7 @@ def train_and_evaluate(
     writers,
     pbar: tqdm,
     initial_step: int,
+    gradient_accumulation_steps: int = 1,
 ):
     net_g, net_d, net_dur_disc, net_wd, wl = nets
     optim_g, optim_d, optim_dur_disc, optim_wd = optims
@@ -971,6 +1117,10 @@ def train_and_evaluate(
         net_dur_disc.train()
     if net_wd is not None:
         net_wd.train()
+
+    # 勾配累積用の変数
+    is_accumulating = gradient_accumulation_steps > 1
+
     for batch_idx, (
         x,
         x_lengths,
@@ -1178,20 +1328,37 @@ def train_and_evaluate(
                 if net_wd is not None:
                     loss_gen_all += loss_lm + loss_lm_gen
 
-        optim_g.zero_grad()
-        scaler.scale(loss_gen_all).backward()
-        scaler.unscale_(optim_g)
-        # if getattr(hps.train, "bf16_run", False):
-        # 勾配爆発を防ぐため、常に勾配クリッピングを適用
-        torch.nn.utils.clip_grad_norm_(parameters=net_g.parameters(), max_norm=500)
-        grad_norm_g = commons.clip_grad_value_(net_g.parameters(), None)
-        scaler.step(optim_g)
-        scaler.update()
+        # 勾配累積を使用する場合は、累積ステップの最初でのみ zero_grad() を呼ぶ
+        is_first_accumulation_step = (batch_idx % gradient_accumulation_steps) == 0
+        is_last_accumulation_step = ((batch_idx + 1) % gradient_accumulation_steps) == 0
+        if is_first_accumulation_step:
+            optim_g.zero_grad()
 
-        # 勾配ノルムに基づく自動学習率調整
-        # 分散学習での競合を避けるため、rank 0 のみがモニタリングと調整を行う
-        if rank == 0 and gradient_monitor is not None:
-            gradient_monitor.update(grad_norm_g, optim_g, scheduler_g, global_step)
+        # 勾配累積時は損失を累積ステップ数で割って平均化
+        if is_accumulating:
+            loss_gen_all = loss_gen_all / gradient_accumulation_steps
+
+        scaler.scale(loss_gen_all).backward()
+
+        # 累積ステップの最後でのみオプティマイザを更新
+        grad_norm_g = 0.0
+        if is_last_accumulation_step or not is_accumulating:
+            scaler.unscale_(optim_g)
+            # 勾配爆発を防ぐため、常に勾配クリッピングを適用
+            # if getattr(hps.train, "bf16_run", False):
+            torch.nn.utils.clip_grad_norm_(parameters=net_g.parameters(), max_norm=500)
+            grad_norm_g = commons.clip_grad_value_(net_g.parameters(), None)
+            scaler.step(optim_g)
+            scaler.update()
+
+            # EMA の更新（オプティマイザステップ後に実行）
+            if ema_model is not None:
+                ema_model.update(net_g)
+
+            # 勾配ノルムに基づく自動学習率調整
+            # 分散学習での競合を避けるため、rank 0 のみがモニタリングと調整を行う
+            if rank == 0 and gradient_monitor is not None:
+                gradient_monitor.update(grad_norm_g, optim_g, scheduler_g, global_step)
 
         if rank == 0:
             if global_step % hps.train.log_interval == 0 and not hps.speedup:
@@ -1327,8 +1494,12 @@ def train_and_evaluate(
                         sort_by_time=True,
                     )
                 # Save safetensors (for inference) to `model_assets/{model_name}`
+                # EMA が有効な場合は EMA 重みを保存（より安定した推論結果が期待できる）
+                model_to_save = (
+                    ema_model.get_ema_model() if ema_model is not None else net_g
+                )
                 utils.safetensors.save_safetensors(
-                    net_g,
+                    model_to_save,
                     epoch,
                     os.path.join(
                         config.out_dir,
