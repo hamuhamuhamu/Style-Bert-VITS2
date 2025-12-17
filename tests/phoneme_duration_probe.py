@@ -1,11 +1,14 @@
 """
-Usage: .venv/bin/python -m tests.phoneme_duration_probe [--model koharune-ami] [--text "今日はいい天気ですね。"] [--dump-json output.json]
+Usage: .venv/bin/python -m tests.phoneme_duration_probe [--model koharune-ami] [--text "今日はいい天気ですね。"] [--language JP]
+    [--speaker-id 0] [--style Neutral] [--style-weight 1.0] [--length-scale 1.0] [--sdp-ratio 0.0] [--noise-scale-w 0.8]
+    [--device cpu] [--runs 1] [--seed 1234] [--max-tokens 80] [--dump-json output.json]
 
 Style-Bert-VITS2 モデルのトークンレベルの持続時間（ブランクトークンを含む）を推定するスクリプト。
 
 このスクリプトはアライメント生成ステップまでモデルを実行し、各入力トークンに割り当てられた
 メルフレーム数を報告する。`add_blank`（挿入）の動作を実証的に調査し、以下のトークンに
-どれだけの持続時間が割り当てられているかを確認することを目的とする：
+どれだけの持続時間が割り当てられているかを確認することを目的とする。
+--sdp-ratio を 0.0 から変更すると、音素長のランダム変化幅が大きくなる。
 
 - 挿入されたブランクトークン（`add_blank` 後の偶数インデックス）
 - G2P からの元の PAD トークン（先頭/末尾に追加された "_"；奇数インデックス）
