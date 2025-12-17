@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Usage: .venv/bin/python -m tests.module_timing_benchmark [--device cuda] [--model koharune-ami] [--runs 5]
 

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Usage: .venv/bin/python -m tests.debug_memory_profiling [--device cuda] [--models 3] [--warmup 5] [--iterations 10]
 
@@ -449,7 +448,7 @@ def run_comprehensive_profiling(
 
     # 出力ディレクトリ作成
     output_dir = Path("tests/profiling_results")
-    output_dir.mkdir(exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     timestamp = int(time.time())
 

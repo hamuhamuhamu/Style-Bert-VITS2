@@ -170,7 +170,10 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         # 変更は引数で与えられた phone / tone / word2ph に in-place で適用される
         language = Languages[language_str]
         convert_unsupported_phones_for_current_model(
-            phone, tone, word2ph, language,
+            phone,
+            tone,
+            word2ph,
+            language,
         )
         phone, tone, language = cleaned_text_to_sequence(phone, tone, language)
         if self.add_blank:

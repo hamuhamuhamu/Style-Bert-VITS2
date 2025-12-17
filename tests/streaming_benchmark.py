@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Usage: .venv/bin/python -m tests.streaming_benchmark [--device cuda] [--model koharune-ami] [--runs 3]
 

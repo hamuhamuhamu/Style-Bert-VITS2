@@ -1,19 +1,13 @@
-from __future__ import annotations
-
-
 """
+Usage: .venv/bin/python -m tests.optimization_experiments [--device cuda:0] [--model-name 10-hinataanna] [--num-runs 3]
+
 Style-Bert-VITS2 の推論高速化施策を比較検証するためのスクリプト。
 
 - 既存モデルの追加学習は行わず、推論グラフのみを変更する
 - それぞれの施策について、変更前 / 変更後で速度・VRAM 使用量・波形レベルの差分を計測する
-
-使用例:
-
-    .venv/bin/python -m tests.optimization_experiments \\
-        --device cuda:0 \\
-        --model-name 10-hinataanna \\
-        --num-runs 3
 """
+
+from __future__ import annotations
 
 import argparse
 import random

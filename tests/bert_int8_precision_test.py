@@ -1,12 +1,10 @@
-#!/usr/bin/env python3
 """
+Usage: .venv/bin/python -m tests.bert_int8_precision_test [--device cuda] [--warmup-runs 3] [--test-runs 5]
+
 BERT 8bit 量子化精度評価テストスクリプト
 
 このスクリプトは実際のユースケースに近い形で BERT モデルの 8bit 量子化による影響を評価する。
 各精度設定で一度だけモデルをロードし、複数のテキストで推論を実行してウォーミングアップ後の性能を測定する。
-
-使用方法:
-    .venv/bin/python -m tests.bert_int8_precision_test [--device cuda] [--warmup-runs 3] [--test-runs 5]
 """
 
 import argparse

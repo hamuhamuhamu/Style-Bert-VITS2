@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Usage: PYTORCH_CUDA_ALLOC_CONF="backend:cudaMallocAsync,expandable_segments:True" .venv/bin/python -m tests.realistic_memory_profiling [--device cuda] [--iterations 50] [--interval 2] [--enable-padding]
 
@@ -536,7 +535,7 @@ def main():
         if analysis:
             # 結果を保存
             output_dir = Path("tests/profiling_results")
-            output_dir.mkdir(exist_ok=True)
+            output_dir.mkdir(parents=True, exist_ok=True)
 
             timestamp = int(time.time())
             output_path = output_dir / f"realistic_profiling_{timestamp}.json"

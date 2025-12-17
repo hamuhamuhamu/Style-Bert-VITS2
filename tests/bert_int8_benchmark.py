@@ -1,12 +1,10 @@
-#!/usr/bin/env python3
 """
+Usage: .venv/bin/python -m tests.bert_int8_benchmark [--device cuda] [--model koharune-ami] [--warmup-runs 2] [--test-runs 3]
+
 BERT 8bit 量子化の音声合成品質への影響評価テストスクリプト
 
 このスクリプトは実際のユースケースに近い形で BERT モデルの 8bit 量子化が音声合成品質に与える影響を評価する。
 各精度設定で一度だけモデルをロードし、複数のテキストで音声合成を実行してウォーミングアップ後の性能を測定する。
-
-使用方法:
-    .venv/bin/python -m tests.bert_int8_benchmark [--device cuda] [--model koharune-ami] [--warmup-runs 2] [--test-runs 3]
 """
 
 import argparse

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Usage: PYTORCH_CUDA_ALLOC_CONF="backend:cudaMallocAsync,expandable_segments:True" .venv/bin/python -m tests.tensor_padding_benchmark [--device cuda] [--model koharune-ami] [--iterations 30]
 

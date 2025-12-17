@@ -163,7 +163,7 @@ def synthesize(
 
                         # 音声データを保存
                         output_dir = BASE_DIR / f"tests/wavs/{model_info.name}"
-                        output_dir.mkdir(exist_ok=True, parents=True)
+                        output_dir.mkdir(parents=True, exist_ok=True)
                         # ファイル名はスタイル名と実行インデックス (01~04) で一意にする
                         wav_file_path = output_dir / f"{style}_{i + 1:02d}.wav"
                         with open(wav_file_path, "wb") as f:
