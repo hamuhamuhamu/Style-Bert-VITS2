@@ -206,8 +206,8 @@ class GradientMonitor:
         if is_spike and not is_in_cooldown:
             is_adjustment_needed = True
             adjustment_reason = (
-                f"Spike detected: grad_norm_g={grad_norm_g:.2f} is {grad_norm_g / old_ema:.1f}x "
-                f"higher than EMA={old_ema:.2f}"
+                f"Spike detected: grad_norm_g: {grad_norm_g:.2f} is {grad_norm_g / old_ema:.1f}x "
+                f"higher than EMA: {old_ema:.2f}"
             )
         elif is_sustained_high and not is_in_cooldown:
             is_adjustment_needed = True
@@ -955,7 +955,7 @@ def run():
     if args.use_ema:
         ema_model = EMAModel(net_g, decay=args.ema_decay)
         logger.info(
-            f"[EMA] Enabled with decay={args.ema_decay}. EMA weights will be saved for inference."
+            f"[EMA] Enabled with decay: {args.ema_decay}. EMA weights will be saved for inference."
         )
     else:
         ema_model = None

@@ -116,9 +116,9 @@ class MemoryProfiler:
         self.snapshots.append(memory_info)
 
         logger.info(
-            f"{label}: Allocated={memory_info['allocated']:.3f}GB, "
-            f"Reserved={memory_info['reserved']:.3f}GB, "
-            f"Fragmentation={memory_info['fragmentation']:.3f}GB"
+            f"{label}: Allocated: {memory_info['allocated']:.3f}GB, "
+            f"Reserved: {memory_info['reserved']:.3f}GB, "
+            f"Fragmentation: {memory_info['fragmentation']:.3f}GB"
         )
 
     def save_profiler_trace(self, trace_path: str) -> None:

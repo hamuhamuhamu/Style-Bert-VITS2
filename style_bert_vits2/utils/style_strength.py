@@ -151,7 +151,7 @@ def apply_style_strength(
         gain = current_weight / target_weight
         style_diff = style_vectors[style_id] - mean_vector
         style_vectors[style_id] = mean_vector + style_diff * gain
-        updated_styles.append(f"{style_name} (gain={gain:.3f})")
+        updated_styles.append(f"{style_name} (gain: {gain:.3f})")
 
     if not updated_styles:
         return False, "更新対象のスタイルがありませんでした。"

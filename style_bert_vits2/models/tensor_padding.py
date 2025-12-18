@@ -206,13 +206,13 @@ def _get_pooled_tensor(
                 # 全体をゼロ化する方が安全かつシンプル
                 if zero_init:
                     tensor.zero_()
-                logger.debug(f"Reused pooled tensor: {pool_key}, size={padded_length}")
+                logger.debug(f"Reused pooled tensor: {pool_key}, size: {padded_length}")
                 return tensor
             else:
                 # 形状が一致しない場合は削除
                 del pool[padded_length]
                 logger.debug(
-                    f"Removed mismatched tensor: {pool_key}, size={padded_length}"
+                    f"Removed mismatched tensor: {pool_key}, size: {padded_length}"
                 )
 
         # 新規作成してプールに追加
@@ -222,7 +222,7 @@ def _get_pooled_tensor(
             tensor = torch.empty(padded_shape_tuple, dtype=dtype, device=device)
 
         pool[padded_length] = (tensor, time.time())
-        logger.debug(f"Created new pooled tensor: {pool_key}, size={padded_length}")
+        logger.debug(f"Created new pooled tensor: {pool_key}, size: {padded_length}")
 
         return tensor
 
@@ -270,7 +270,7 @@ def _cleanup_memory_pools() -> None:
             if age > POOL_MAX_AGE_SECONDS:
                 sizes_to_remove.append(padded_size)
                 logger.debug(
-                    f"Removing aged tensor: {pool_key}, size={padded_size}, age={age:.1f}s"
+                    f"Removing aged tensor: {pool_key}, size: {padded_size}, age: {age:.1f}s"
                 )
             else:
                 total_memory_bytes += tensor.element_size() * tensor.numel()
@@ -321,7 +321,7 @@ def _evict_oldest_tensors(memory_to_free_gb: float) -> None:
             del _memory_pools[pool_key][padded_size]
             freed_memory += memory_gb
             logger.debug(
-                f"Evicted tensor: {pool_key}, size={padded_size}, freed={memory_gb:.3f}GB"
+                f"Evicted tensor: {pool_key}, size: {padded_size}, freed: {memory_gb:.3f}GB"
             )
 
 

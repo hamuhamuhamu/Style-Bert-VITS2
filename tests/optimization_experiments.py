@@ -126,7 +126,7 @@ def select_target_model(
     model = holder.get_model(target_info.name, model_files[0].as_posix())
     model.load()
     logger.info(
-        f"Using model `{target_info.name}` (version={model.hyper_parameters.version})"
+        f"Using model `{target_info.name}` (version: {model.hyper_parameters.version})"
     )
     return holder, model
 
@@ -237,13 +237,13 @@ def summarize_metrics(
     reserved = np.array([m.max_reserved_bytes for m in metrics_list], dtype=np.float64)
 
     logger.info(
-        f"[{name}] elapsed_sec: mean={elapsed.mean():.4f}s, std={elapsed.std():.4f}s"
+        f"[{name}] elapsed_sec: mean: {elapsed.mean():.4f}s, std: {elapsed.std():.4f}s"
     )
     logger.info(
-        f"[{name}] max_alloc_bytes: mean={alloc.mean():.0f}, min={alloc.min():.0f}, max={alloc.max():.0f}"
+        f"[{name}] max_alloc_bytes: mean: {alloc.mean():.0f}, min: {alloc.min():.0f}, max: {alloc.max():.0f}"
     )
     logger.info(
-        f"[{name}] max_reserved_bytes: mean={reserved.mean():.0f}, min={reserved.min():.0f}, max={reserved.max():.0f}"
+        f"[{name}] max_reserved_bytes: mean: {reserved.mean():.0f}, min: {reserved.min():.0f}, max: {reserved.max():.0f}"
     )
 
     diffs = [m for m in metrics_list if m.max_abs_diff is not None]
@@ -257,12 +257,12 @@ def summarize_metrics(
             dtype=np.float64,
         )
         logger.info(
-            f"[{name}] waveform max_abs_diff: mean={max_abs.mean():.6f}, "
-            f"max={max_abs.max():.6f}"
+            f"[{name}] waveform max_abs_diff: mean: {max_abs.mean():.6f}, "
+            f"max: {max_abs.max():.6f}"
         )
         logger.info(
-            f"[{name}] waveform mean_abs_diff: mean={mean_abs.mean():.6f}, "
-            f"max={mean_abs.max():.6f}"
+            f"[{name}] waveform mean_abs_diff: mean: {mean_abs.mean():.6f}, "
+            f"max: {mean_abs.max():.6f}"
         )
 
 

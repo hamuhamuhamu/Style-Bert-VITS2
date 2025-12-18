@@ -211,9 +211,9 @@ def simulate_production_usage(
     # 初期メモリ状態
     initial_memory = profiler.get_memory_stats()
     logger.info(
-        f"初期状態: Allocated={initial_memory['allocated']:.3f}GB, "
-        f"Reserved={initial_memory['reserved']:.3f}GB, "
-        f"Free={initial_memory['free']:.3f}GB"
+        f"初期状態: Allocated: {initial_memory['allocated']:.3f}GB, "
+        f"Reserved: {initial_memory['reserved']:.3f}GB, "
+        f"Free: {initial_memory['free']:.3f}GB"
     )
 
     # BERTモデルをロード（実環境では常駐）

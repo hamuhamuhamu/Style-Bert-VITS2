@@ -362,10 +362,10 @@ def main() -> None:
     text_tag = _safe_filename(args.text)
 
     logger.info("Starting vowel stretch experiment")
-    logger.info(f"text={args.text}")
-    logger.info(f"vowel_stretch={float(args.vowel_stretch):.3f}")
+    logger.info(f"text: {args.text}")
+    logger.info(f"vowel_stretch: {float(args.vowel_stretch):.3f}")
     logger.info(
-        f"length_scale={float(args.length_scale):.3f} sdp_ratio={float(args.sdp_ratio):.3f}"
+        f"length_scale: {float(args.length_scale):.3f}, sdp_ratio: {float(args.sdp_ratio):.3f}"
     )
 
     for model_name in model_names:
@@ -373,7 +373,7 @@ def main() -> None:
             (info for info in model_holder.models_info if info.name == model_name), None
         )
         if model_info is None:
-            logger.warning(f"Model not found. name={model_name}")
+            logger.warning(f"Model not found. name: {model_name}")
             continue
 
         safetensors_files = [
@@ -382,26 +382,26 @@ def main() -> None:
             if f.endswith(".safetensors") and not f.startswith(".")
         ]
         if len(safetensors_files) == 0:
-            logger.warning(f"No .safetensors found for model. name={model_name}")
+            logger.warning(f"No .safetensors found for model. name: {model_name}")
             continue
 
         model_file = safetensors_files[0]
-        logger.info(f"Loading model. name={model_name} file={model_file}")
+        logger.info(f"Loading model. name: {model_name}, file: {model_file}")
         tts_model: TTSModel = model_holder.get_model(model_name, model_file)
         tts_model.load()
         if tts_model.net_g is None:
-            logger.warning(f"net_g is not loaded. name={model_name}")
+            logger.warning(f"net_g is not loaded. name: {model_name}")
             continue
 
         if not tts_model.hyper_parameters.version.endswith("JP-Extra"):
             logger.warning(
-                f"Skipping non JP-Extra model. name={model_name} version={tts_model.hyper_parameters.version}"
+                f"Skipping non JP-Extra model. name: {model_name}, version: {tts_model.hyper_parameters.version}"
             )
             continue
 
         if args.style not in tts_model.style2id:
             logger.warning(
-                f"Style '{args.style}' not found for model. Falling back to the first available style. name={model_name}"
+                f"Style '{args.style}' not found for model. Falling back to the first available style. name: {model_name}"
             )
             style_name = next(iter(tts_model.style2id.keys()))
         else:
@@ -515,12 +515,12 @@ def main() -> None:
 
         logger.info(
             "Result. "
-            f"name={model_name} sr={sr} "
-            f"normal_sec={normal_sec:.3f} stretched_sec={stretched_sec:.3f} ratio={ratio:.3f} "
-            f"frames_normal={total_frames_normal:.1f} frames_stretched={total_frames_stretched:.1f} frame_ratio={frame_ratio:.3f}"
+            f"name: {model_name}, sr: {sr}, "
+            f"normal_sec: {normal_sec:.3f}, stretched_sec: {stretched_sec:.3f}, ratio: {ratio:.3f}, "
+            f"frames_normal: {total_frames_normal:.1f}, frames_stretched: {total_frames_stretched:.1f}, frame_ratio: {frame_ratio:.3f}"
         )
-        logger.info(f"WAV saved. normal={wav_normal_path}")
-        logger.info(f"WAV saved. stretched={wav_stretched_path}")
+        logger.info(f"WAV saved. normal: {wav_normal_path}")
+        logger.info(f"WAV saved. stretched: {wav_stretched_path}")
 
 
 if __name__ == "__main__":

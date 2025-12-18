@@ -360,9 +360,9 @@ def run_torch_compile_benchmark(
             compile_time_ms = 0.0
             if compile_mode is not None or compile_backend is not None:
                 backend_info = (
-                    f"backend={compile_backend}"
+                    f"backend: {compile_backend}"
                     if compile_backend
-                    else f"mode={compile_mode}"
+                    else f"mode: {compile_mode}"
                 )
                 print(f"torch.compile を適用中 ({backend_info})...")
 
@@ -443,7 +443,7 @@ def run_torch_compile_benchmark(
             print(f"  ウォームアップ時間: {warmup_time_ms:.2f}ms")
             print(
                 f"  平均推論時間: {avg_time:.2f}ms (±{std_time:.2f}ms, "
-                f"min={min_time:.2f}ms, max={max_time:.2f}ms)"
+                f"min: {min_time:.2f}ms, max: {max_time:.2f}ms)"
             )
 
             # モデルをアンロード

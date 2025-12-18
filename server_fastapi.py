@@ -133,7 +133,7 @@ if __name__ == "__main__":
     allow_origins = config.server_config.origins
     if allow_origins:
         logger.warning(
-            f"CORS allow_origins={config.server_config.origins}. If you don't want, modify config.yml"
+            f"CORS allow_origins: {config.server_config.origins}. If you don't want, modify config.yml"
         )
         app.add_middleware(
             CORSMiddleware,
@@ -209,7 +209,7 @@ if __name__ == "__main__":
         if model_id >= len(
             model_holder.model_names
         ):  # /models/refresh があるためQuery(le)で表現不可
-            raise_validation_error(f"model_id={model_id} not found", "model_id")
+            raise_validation_error(f"model_id: {model_id} not found", "model_id")
 
         if model_name:
             # load_models() の 処理内容が i の正当性を担保していることに注意
@@ -220,12 +220,12 @@ if __name__ == "__main__":
             ]
             if not model_ids:
                 raise_validation_error(
-                    f"model_name={model_name} not found", "model_name"
+                    f"model_name: {model_name} not found", "model_name"
                 )
             # 今の実装ではディレクトリ名が重複することは無いはずだが...
             if len(model_ids) > 1:
                 raise_validation_error(
-                    f"model_name={model_name} is ambiguous", "model_name"
+                    f"model_name: {model_name} is ambiguous", "model_name"
                 )
             model_id = model_ids[0]
 
@@ -233,16 +233,16 @@ if __name__ == "__main__":
         if speaker_name is None:
             if speaker_id not in model.id2spk.keys():
                 raise_validation_error(
-                    f"speaker_id={speaker_id} not found", "speaker_id"
+                    f"speaker_id: {speaker_id} not found", "speaker_id"
                 )
         else:
             if speaker_name not in model.spk2id.keys():
                 raise_validation_error(
-                    f"speaker_name={speaker_name} not found", "speaker_name"
+                    f"speaker_name: {speaker_name} not found", "speaker_name"
                 )
             speaker_id = model.spk2id[speaker_name]
         if style not in model.style2id.keys():
-            raise_validation_error(f"style={style} not found", "style")
+            raise_validation_error(f"style: {style} not found", "style")
         assert style is not None
         if encoding is not None:
             text = unquote(text, encoding=encoding)
@@ -340,7 +340,7 @@ if __name__ == "__main__":
             f"{request.client.host}:{request.client.port}/tools/get_audio  {unquote(str(request.query_params))}"
         )
         if not os.path.isfile(path):
-            raise_validation_error(f"path={path} not found", "path")
+            raise_validation_error(f"path: {path} not found", "path")
         if not path.lower().endswith(".wav"):
             raise_validation_error(f"wav file not found in {path}", "path")
         return FileResponse(path=path, media_type="audio/wav")

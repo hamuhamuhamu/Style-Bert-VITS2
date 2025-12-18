@@ -254,10 +254,10 @@ def main() -> None:
     is_add_blank_enabled = bool(hps.data.add_blank)
 
     logger.info("Loading model for duration probing")
-    logger.info(f"model_path={tts_model.model_path}")
-    logger.info(f"config_path={tts_model.config_path}")
-    logger.info(f"style_vec_path={tts_model.style_vec_path}")
-    logger.info(f"device={args.device}")
+    logger.info(f"model_path: {tts_model.model_path}")
+    logger.info(f"config_path: {tts_model.config_path}")
+    logger.info(f"style_vec_path: {tts_model.style_vec_path}")
+    logger.info(f"device: {args.device}")
 
     if args.style not in tts_model.style2id:
         logger.warning(
@@ -428,8 +428,8 @@ def main() -> None:
 
             logger.info(
                 "Run completed. "
-                f"run_index={run_index} tokens={token_count} "
-                f"total_frames={total_frames:.1f} total_seconds={total_seconds:.3f}"
+                f"run_index: {run_index}, tokens: {token_count}, "
+                f"total_frames: {total_frames:.1f}, total_seconds: {total_seconds:.3f}"
             )
 
             preview_len = min(int(args.max_tokens), token_count)
@@ -447,25 +447,25 @@ def main() -> None:
                     flags.append("punctuation")
                 flag_str = ",".join(flags) if len(flags) > 0 else "-"
                 logger.info(
-                    f"idx={token_index:3d} id={token_ids[token_index]:3d} "
-                    f"sym={symbol:<6s} dur_frames={duration_f:6.1f} "
-                    f"dur_sec={duration_s:7.4f} flags={flag_str}"
+                    f"idx: {token_index:3d}, id: {token_ids[token_index]:3d}, "
+                    f"sym: {symbol:<6s}, dur_frames: {duration_f:6.1f}, "
+                    f"dur_sec: {duration_s:7.4f}, flags: {flag_str}"
                 )
 
             stats: dict[str, Any] = record["stats"]
             logger.info(
-                f"Summary (frames): inserted_blank={stats['inserted_blank_frames']}"
+                f"Summary (frames): inserted_blank: {stats['inserted_blank_frames']}"
             )
             logger.info(
-                f"Summary (frames): original_pad={stats['original_pad_frames']}"
+                f"Summary (frames): original_pad: {stats['original_pad_frames']}"
             )
-            logger.info(f"Summary (frames): non_pad={stats['non_pad_frames']}")
+            logger.info(f"Summary (frames): non_pad: {stats['non_pad_frames']}")
             inserted_blank_share = stats.get("inserted_blank_share", float("nan"))
             original_pad_share = stats.get("original_pad_share", float("nan"))
             logger.info(
                 "Share: "
-                f"inserted_blank={float(inserted_blank_share):.4f} "
-                f"original_pad={float(original_pad_share):.4f}"
+                f"inserted_blank: {float(inserted_blank_share):.4f}, "
+                f"original_pad: {float(original_pad_share):.4f}"
             )
 
     # JSON ダンプ処理

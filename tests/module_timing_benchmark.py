@@ -347,12 +347,12 @@ def run_benchmark(
 
                 print(
                     f"  Run {run + 1}: "
-                    f"TextEnc={timings.text_encoder_ms:.2f}ms, "
-                    f"DurPred={timings.duration_predictor_ms:.2f}ms, "
-                    f"Flow={timings.flow_ms:.2f}ms, "
-                    f"Gen={timings.generator_ms:.2f}ms, "
-                    f"Total={timings.total_ms:.2f}ms "
-                    f"(frames={timings.output_length})"
+                    f"TextEnc: {timings.text_encoder_ms:.2f}ms, "
+                    f"DurPred: {timings.duration_predictor_ms:.2f}ms, "
+                    f"Flow: {timings.flow_ms:.2f}ms, "
+                    f"Gen: {timings.generator_ms:.2f}ms, "
+                    f"Total: {timings.total_ms:.2f}ms "
+                    f"(frames: {timings.output_length})"
                 )
 
             except Exception as ex:
@@ -385,7 +385,7 @@ def run_benchmark(
         }
         results.append(result)
 
-        print(f"  平均: Total={avg_total:.2f}ms, frames={avg_output_length:.0f}")
+        print(f"  平均: Total: {avg_total:.2f}ms, frames: {avg_output_length:.0f}")
         print("-" * 60)
 
     # モデルをアンロード
