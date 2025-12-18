@@ -12,6 +12,7 @@ from style_bert_vits2.constants import Languages
 from style_bert_vits2.logging import logger
 from style_bert_vits2.models import commons, utils
 from style_bert_vits2.models.hyper_parameters import HyperParameters
+from style_bert_vits2.models.infer_onnx import TokenDurationsResult
 from style_bert_vits2.models.models import SynthesizerTrn
 from style_bert_vits2.models.models_jp_extra import (
     SynthesizerTrn as SynthesizerTrnJPExtra,
@@ -364,6 +365,340 @@ def prepare_inference_data(
     )
 
 
+def predict_token_durations(
+    text: str,
+    style_vec: NDArray[Any],
+    sdp_ratio: float,
+    noise_scale_w: float,
+    sid: int,
+    language: Languages,
+    hps: HyperParameters,
+    net_g: SynthesizerTrn | SynthesizerTrnJPExtra,
+    device: str,
+    skip_start: bool = False,
+    skip_end: bool = False,
+    assist_text: str | None = None,
+    assist_text_weight: float = 0.7,
+    given_phone: list[str] | None = None,
+    given_tone: list[int] | None = None,
+    jtalk: OpenJTalk | None = None,
+    use_fp16: bool = False,
+    enable_tensor_padding: bool = False,
+) -> TokenDurationsResult:
+    """
+    PyTorch 版音声合成モデルの duration（内部トークン列単位）を推定する関数。
+    Decoder (Generator) は実行せず、Encoder + DP/SDP のみを実行する。
+    返り値の durations_frames は add_blank 適用後の内部トークン列に対応する。
+
+    重要：
+    - ここでいう duration は「メルスペクトログラムのフレーム数」であり、秒ではない。
+      秒への換算は `seconds_per_frame = hop_length / sampling_rate` に基づいて行う。
+    - VITS 系では、音声波形を直接 44.1kHz のサンプル単位で長さ制御するのではなく、
+      まず潜在表現（メルフレーム空間）を音素列にアライメントし、その後に Decoder がアップサンプリングして波形を生成する。
+      したがって「フレーム単位」が長さ制御の最小単位になり、秒指定を内部でフレームに丸める必要がある。
+    - この関数は「長さ推定だけ高速に欲しい」用途を想定しており、Decoder 以降の計算 (flow / generator) を意図的に省略する。
+      そのため `noise_scale` (Decoder 側のサンプリングノイズなど) は関与せず、duration 推定に影響する `noise_scale_w`
+      (SDP: Stochastic Duration Predictor のノイズ) だけを受け取る。
+    - 返り値は常に `length_scale=1.0`（話速スケール未適用）を前提とした duration になる。
+
+    Returns:
+        TokenDurationsResult: 予測されたトークンの長さ（メルフレーム数）を秒単位で返す
+    """
+
+    is_jp_extra = hps.version.endswith("JP-Extra")
+
+    with torch.inference_mode():
+        (
+            x_tst,
+            x_tst_lengths,
+            sid_tensor,
+            tones,
+            lang_ids,
+            zh_bert,
+            ja_bert,
+            en_bert,
+            style_vec_tensor,
+        ) = prepare_inference_data(
+            text,
+            style_vec=style_vec,
+            sid=sid,
+            language=language,
+            hps=hps,
+            device=device,
+            skip_start=skip_start,
+            skip_end=skip_end,
+            assist_text=assist_text,
+            assist_text_weight=assist_text_weight,
+            given_phone=given_phone,
+            given_tone=given_tone,
+            jtalk=jtalk,
+            enable_tensor_padding=enable_tensor_padding,
+        )
+
+        # 通常は multi-speaker 前提で、sid から話者埋め込み g を作る
+        # n_speakers <= 0 のモデルは事前学習モデル時点で存在しないはずだが、念のため明示的にエラーにする
+        if net_g.n_speakers <= 0:
+            raise ValueError(
+                "predict_token_durations does not support n_speakers <= 0 models"
+            )
+        g = net_g.emb_g(sid_tensor).unsqueeze(-1)
+
+        # Encoder 入力の組み立てのみ、JP-Extra と通常モデルでシグネチャが異なるため分岐する
+        # それ以外（SDP/DP の呼び出しや後続計算）は同一 API のため共通化する
+        if is_jp_extra:
+            if use_fp16 is True:
+                # JP-Extra では ja_bert のみを参照するため、ここだけ float32 に戻せばよい
+                # （prepare_inference_data() 側で既に float32 になっているはずだが、念のため明示的に float32 に戻す）
+                ja_bert = ja_bert.float()
+
+            x, _m_p, _logs_p, x_mask = cast(SynthesizerTrnJPExtra, net_g).enc_p(
+                x_tst,
+                x_tst_lengths,
+                tones,
+                lang_ids,
+                ja_bert,
+                style_vec_tensor,
+                g=g,
+                use_fp16=use_fp16,
+            )
+        else:
+            if use_fp16 is True:
+                # 通常モデルは多言語対応で、zh/ja/en の各 BERT を参照し得るため、まとめて float32 に正規化する
+                zh_bert = zh_bert.float()
+                ja_bert = ja_bert.float()
+                en_bert = en_bert.float()
+
+            x, _m_p, _logs_p, x_mask = cast(SynthesizerTrn, net_g).enc_p(
+                x_tst,
+                x_tst_lengths,
+                tones,
+                lang_ids,
+                zh_bert,
+                ja_bert,
+                en_bert,
+                style_vec_tensor,
+                sid_tensor,
+                g=g,
+                use_fp16=use_fp16,
+            )
+
+        # Duration Predictor の推定値 logw を、DP と SDP の比率で混合して使う
+        # SDP（stochastic）は noise_scale_w により揺らぎが入りやすい
+        # DP（deterministic）は揺らぎが少なく、比較的安定しやすい
+        net_g_duration = cast(Any, net_g)
+        logw = net_g_duration.sdp(
+            x,
+            x_mask,
+            g=g,
+            reverse=True,
+            noise_scale=noise_scale_w,
+        ) * (sdp_ratio) + net_g_duration.dp(x, x_mask, g=g) * (1 - sdp_ratio)
+
+        # 推定 duration（フレーム数）は exp(logw) を基に作る
+        # さらに x_mask を掛けることで padding を除外する
+        # ここでは話速 (length_scale) を適用せず、常に length_scale=1.0 での基準 duration を返す
+        w = torch.exp(logw) * x_mask
+        w_ceil = torch.ceil(w)
+
+        durations_frames = w_ceil[0, 0].detach().cpu().to(torch.int64).numpy()
+        token_ids = x_tst[0].detach().cpu().to(torch.int64).numpy()
+
+        seconds_per_frame = float(hps.data.hop_length) / float(hps.data.sampling_rate)
+        durations_seconds = durations_frames.astype(np.float32) * float(
+            seconds_per_frame
+        )
+
+        return TokenDurationsResult(
+            sampling_rate=int(hps.data.sampling_rate),
+            hop_length=int(hps.data.hop_length),
+            token_ids=token_ids.tolist(),
+            durations_frames=durations_frames.tolist(),
+            durations_seconds=durations_seconds.tolist(),
+        )
+
+
+def _prepare_duration_frames_override_from_given_phone_length(
+    given_phone: list[str] | None,
+    given_phone_length: list[float | None] | None,
+    expected_token_length: int,
+    skip_start: bool,
+    skip_end: bool,
+    length_scale: float,
+    hps: HyperParameters,
+    device: str,
+    enable_tensor_padding: bool,
+) -> tuple[torch.Tensor | None, torch.Tensor | None]:
+    """
+    音素長（秒）の指定を、モデル内部の duration 上書きテンソル（フレーム数）に変換して返す。
+
+    この関数では以下を一括で行う。
+    1) 入力 (given_phone_length / given_phone) の整合性チェック
+    2) 秒 → フレームへの換算 (`ceil(seconds / seconds_per_frame)`)
+    3) `add_blank` への対応（内部トークン列は 2N+1 になる）
+    4) `skip_start / skip_end` のスライスを、duration 上書きテンソルにも同じように適用
+    5) 最終的に、推論に使われる `x_tst`（内部トークン列）と長さが一致することを検証
+
+    VITS 系の `add_blank` は「音素遷移（境界）」の表現としてモデルが学習している可能性が高く、
+    実測でも blank トークンが総フレームのかなりの割合を占める。
+    そのため、API 側が blank を意識しない設計であっても、ここで blank の duration を雑に固定したり、
+    一律 0 に潰したりすると推論品質が劣化し得る。
+    そこで本実装では、呼び出し側が音素長（子音/母音など）を指定した場合でも、
+    blank トークン（`add_blank` により挿入されるトークン）については「未指定」として扱い、
+    duration 推定器 (DP/SDP) が出した値をそのまま採用する。
+    具体的には、`add_blank=True` のとき、元音素に対応する odd index のみをマスク True にし、
+    even index（blank）をマスク False のままにする。
+
+    Returns:
+        tuple[torch.Tensor | None, torch.Tensor | None]:
+            - durations_frames_override: shape [1, 1, T_x]（未指定なら None）
+            - durations_frames_override_mask: shape [1, 1, T_x]（未指定なら None）
+    """
+
+    # 音素長（秒）の最大値を 10 秒とする
+    MAX_PHONE_LENGTH_SECONDS = 10.0
+
+    # given_phone_length が未指定の場合は、duration 上書きを行わない
+    if given_phone_length is None:
+        return None, None
+
+    # given_phone のバリデーション
+    if given_phone is None:
+        raise ValueError("given_phone_length requires given_phone")
+    if len(given_phone_length) != len(given_phone):
+        raise ValueError(
+            "Length of given_phone_length must match length of given_phone. "
+            f"given_phone_length: {len(given_phone_length)}, given_phone: {len(given_phone)}"
+        )
+    phone_count = len(given_phone_length)
+    if phone_count == 0:
+        raise ValueError("given_phone_length must not be empty")
+
+    # length_scale のバリデーション
+    if float(length_scale) <= 0.0:
+        raise ValueError("length_scale must be positive")
+
+    # seconds_per_frame のバリデーション
+    seconds_per_frame = float(hps.data.hop_length) / float(hps.data.sampling_rate)
+    if seconds_per_frame <= 0.0:
+        raise ValueError("seconds_per_frame must be positive")
+
+    # まずは add_blank 適用前（given_phone と同じ長さ）の単位で、秒→フレームに変換する
+    # ここで「未指定」は 0 フレーム + mask False として表現し、後段で `torch.where(mask, override, predicted)` にかける
+    durations_frames_list: list[float] = []
+    durations_mask_list: list[bool] = []
+    for duration_seconds in given_phone_length:
+        if duration_seconds is None or duration_seconds <= 0.0:
+            durations_frames_list.append(0.0)
+            durations_mask_list.append(False)
+            continue
+
+        duration_seconds_float = float(duration_seconds)
+        if not np.isfinite(duration_seconds_float):
+            raise ValueError("given_phone_length must be finite")
+        if duration_seconds_float > MAX_PHONE_LENGTH_SECONDS:
+            raise ValueError(
+                "given_phone_length is too large. "
+                f"max: {MAX_PHONE_LENGTH_SECONDS}, actual: {duration_seconds_float}"
+            )
+
+        # given_phone_length は「length_scale=1.0 基準の秒」として受け取り、
+        # モデル内部の duration（フレーム数）は、推論時点の length_scale に合わせてスケールして上書きする
+        scaled_seconds = duration_seconds_float * float(length_scale)
+        frames = int(np.ceil(scaled_seconds / seconds_per_frame))
+        if frames < 1:
+            # 0 フレームは音が消える/アライメントが破綻する可能性があるため避ける
+            # 「最小 1 フレーム」は最終的な秒精度よりも、推論の安定性を優先する設計
+            frames = 1
+        durations_frames_list.append(float(frames))
+        durations_mask_list.append(True)
+
+    # add_blank=True の場合、モデル内部のトークン列は intersperse により `2N+1` へ変換される
+    # 例 (N=3):
+    #   phone: [a, b, c]
+    #   token: [0, a, 0, b, 0, c, 0]
+    # このうち even index（0,2,4,6...）は blank であり、ここは外部に公開するのが難しいため、
+    # ここでは「未指定」としてマスク False のままにする（= duration 推定器の出力を採用する）
+    if bool(hps.data.add_blank) is True:
+        token_count = phone_count * 2 + 1
+        durations_frames_token: list[float] = [0.0] * token_count
+        durations_mask_token: list[bool] = [False] * token_count
+        for phone_index, (frames, mask) in enumerate(
+            zip(durations_frames_list, durations_mask_list, strict=True)
+        ):
+            token_index = phone_index * 2 + 1
+            durations_frames_token[token_index] = frames
+            durations_mask_token[token_index] = mask
+    else:
+        token_count = phone_count
+        durations_frames_token = durations_frames_list
+        durations_mask_token = durations_mask_list
+
+    durations_frames_override = (
+        torch.tensor(
+            durations_frames_token,
+            dtype=torch.float32,
+            device=device,
+        )
+        .unsqueeze(0)
+        .unsqueeze(0)
+    )
+    durations_frames_override_mask = (
+        torch.tensor(
+            durations_mask_token,
+            dtype=torch.bool,
+            device=device,
+        )
+        .unsqueeze(0)
+        .unsqueeze(0)
+    )
+    assert durations_frames_override.shape[2] == token_count
+    assert durations_frames_override_mask.shape[2] == token_count
+
+    # `prepare_inference_data()` が skip_start / skip_end により x_tst をスライスしている場合、
+    # duration 上書きテンソル側も同じようにスライスしないと、内部トークン長が一致しない
+    # ここでのスライス値（先頭 3 / 末尾 2）は prepare_inference_data の実装と揃えることが必須
+    if skip_start:
+        durations_frames_override = durations_frames_override[:, :, 3:]
+        durations_frames_override_mask = durations_frames_override_mask[:, :, 3:]
+    if skip_end:
+        durations_frames_override = durations_frames_override[:, :, :-2]
+        durations_frames_override_mask = durations_frames_override_mask[:, :, :-2]
+
+    if int(durations_frames_override.shape[2]) != int(expected_token_length):
+        # enable_tensor_padding=True の場合、x_tst 側が右側に PAD で拡張されている可能性がある
+        # その場合は、duration 上書きテンソルも右側に 0（未指定）を詰めて長さを合わせる
+        # enable_tensor_padding=False の場合は想定外の不一致なので、早期にエラーで止める
+        current_len = int(durations_frames_override.shape[2])
+        expected_len = int(expected_token_length)
+        if current_len < expected_len and enable_tensor_padding is True:
+            pad_len = expected_len - current_len
+            pad_frames = torch.zeros(
+                (1, 1, pad_len),
+                dtype=durations_frames_override.dtype,
+                device=durations_frames_override.device,
+            )
+            pad_mask = torch.zeros(
+                (1, 1, pad_len),
+                dtype=durations_frames_override_mask.dtype,
+                device=durations_frames_override_mask.device,
+            )
+            durations_frames_override = torch.cat(
+                (durations_frames_override, pad_frames),
+                dim=2,
+            )
+            durations_frames_override_mask = torch.cat(
+                (durations_frames_override_mask, pad_mask),
+                dim=2,
+            )
+        else:
+            raise ValueError(
+                "durations_frames_override token length mismatch. "
+                f"expected: {expected_len}, actual: {current_len}"
+            )
+
+    return durations_frames_override, durations_frames_override_mask
+
+
 def infer(
     text: str,
     style_vec: NDArray[Any],
@@ -381,6 +716,7 @@ def infer(
     assist_text: str | None = None,
     assist_text_weight: float = 0.7,
     given_phone: list[str] | None = None,
+    given_phone_length: list[float | None] | None = None,
     given_tone: list[int] | None = None,
     jtalk: OpenJTalk | None = None,
     use_fp16: bool = False,
@@ -421,6 +757,23 @@ def infer(
             enable_tensor_padding=enable_tensor_padding,
         )
 
+        # given_phone_length による duration 指定（オプション）
+        # 呼び出し側が「特定音素だけ延ばす/縮める」用途を想定しているため、未指定 (None or <=0.0) は推定値を採用する
+        # blank トークンは外部に公開するのが難しいため、基本は推定値を維持する（= マスク False のまま）
+        durations_frames_override, durations_frames_override_mask = (
+            _prepare_duration_frames_override_from_given_phone_length(
+                given_phone=given_phone,
+                given_phone_length=given_phone_length,
+                expected_token_length=int(x_tst.shape[1]),
+                skip_start=skip_start,
+                skip_end=skip_end,
+                length_scale=length_scale,
+                hps=hps,
+                device=device,
+                enable_tensor_padding=enable_tensor_padding,
+            )
+        )
+
         if is_jp_extra:
             output = cast(SynthesizerTrnJPExtra, net_g).infer(
                 x_tst,
@@ -435,6 +788,8 @@ def infer(
                 noise_scale=noise_scale,
                 noise_scale_w=noise_scale_w,
                 use_fp16=use_fp16,
+                durations_frames_override=durations_frames_override,
+                durations_frames_override_mask=durations_frames_override_mask,
             )
         else:
             output = cast(SynthesizerTrn, net_g).infer(
@@ -452,6 +807,8 @@ def infer(
                 noise_scale=noise_scale,
                 noise_scale_w=noise_scale_w,
                 use_fp16=use_fp16,
+                durations_frames_override=durations_frames_override,
+                durations_frames_override_mask=durations_frames_override_mask,
             )
 
         audio = output[0][0, 0].data.cpu().float().numpy()
@@ -492,6 +849,7 @@ def infer_stream(
     assist_text: str | None = None,
     assist_text_weight: float = 0.7,
     given_phone: list[str] | None = None,
+    given_phone_length: list[float | None] | None = None,
     given_tone: list[int] | None = None,
     jtalk: OpenJTalk | None = None,
     use_fp16: bool = False,
@@ -545,6 +903,23 @@ def infer_stream(
             enable_tensor_padding=enable_tensor_padding,
         )
 
+        # given_phone_length による duration 指定（オプション）
+        # 呼び出し側が「特定音素だけ延ばす/縮める」用途を想定しているため、未指定 (None or <=0.0) は推定値を採用する
+        # blank トークンは外部に公開するのが難しいため、基本は推定値を維持する（= マスク False のまま）
+        durations_frames_override, durations_frames_override_mask = (
+            _prepare_duration_frames_override_from_given_phone_length(
+                given_phone=given_phone,
+                given_phone_length=given_phone_length,
+                expected_token_length=int(x_tst.shape[1]),
+                skip_start=skip_start,
+                skip_end=skip_end,
+                length_scale=length_scale,
+                hps=hps,
+                device=device,
+                enable_tensor_padding=enable_tensor_padding,
+            )
+        )
+
         # Generator 実行前の共通処理を実行
         if is_jp_extra:
             z, y_mask, g, attn, z_p, m_p, logs_p = cast(
@@ -562,6 +937,8 @@ def infer_stream(
                 noise_scale=noise_scale,
                 noise_scale_w=noise_scale_w,
                 use_fp16=use_fp16,
+                durations_frames_override=durations_frames_override,
+                durations_frames_override_mask=durations_frames_override_mask,
             )
         else:
             z, y_mask, g, attn, z_p, m_p, logs_p = cast(
@@ -581,6 +958,8 @@ def infer_stream(
                 noise_scale=noise_scale,
                 noise_scale_w=noise_scale_w,
                 use_fp16=use_fp16,
+                durations_frames_override=durations_frames_override,
+                durations_frames_override_mask=durations_frames_override_mask,
             )
 
         # Generator 部分のストリーミング処理

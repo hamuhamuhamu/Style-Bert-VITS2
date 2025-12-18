@@ -1189,6 +1189,8 @@ class SynthesizerTrn(nn.Module):
         sdp_ratio: float = 0.0,
         y: torch.Tensor | None = None,
         use_fp16: bool = False,
+        durations_frames_override: torch.Tensor | None = None,
+        durations_frames_override_mask: torch.Tensor | None = None,
     ) -> tuple[
         torch.Tensor,
         torch.Tensor,
@@ -1238,6 +1240,59 @@ class SynthesizerTrn(nn.Module):
 
         w = torch.exp(logw) * x_mask * length_scale
         w_ceil = torch.ceil(w)
+
+        # durations_frames_override が指定された場合、指定されたトークンのみ duration を上書きする
+        if durations_frames_override is not None:
+            override = durations_frames_override
+            if override.dim() == 1:
+                override = override.unsqueeze(0).unsqueeze(0)
+            elif override.dim() == 2:
+                override = override.unsqueeze(1)
+            elif override.dim() != 3:
+                raise ValueError(
+                    "durations_frames_override must be 1D, 2D, or 3D tensor"
+                )
+
+            override = override.to(device=w_ceil.device, dtype=w_ceil.dtype)
+            if override.shape != w_ceil.shape:
+                raise ValueError(
+                    "durations_frames_override shape mismatch. "
+                    f"expected: {tuple(w_ceil.shape)}, actual: {tuple(override.shape)}"
+                )
+
+            if durations_frames_override_mask is not None:
+                mask = durations_frames_override_mask
+                if mask.dim() == 1:
+                    mask = mask.unsqueeze(0).unsqueeze(0)
+                elif mask.dim() == 2:
+                    mask = mask.unsqueeze(1)
+                elif mask.dim() != 3:
+                    raise ValueError(
+                        "durations_frames_override_mask must be 1D, 2D, or 3D tensor"
+                    )
+                mask = mask.to(device=w_ceil.device, dtype=torch.bool)
+                if mask.shape != w_ceil.shape:
+                    raise ValueError(
+                        "durations_frames_override_mask shape mismatch. "
+                        f"expected: {tuple(w_ceil.shape)}, actual: {tuple(mask.shape)}"
+                    )
+            else:
+                # mask が省略された場合、NaN 以外を上書き対象とみなす (float のみ)
+                # それ以外の型では、0 より大きい値のみを上書き対象とみなす
+                if override.is_floating_point():
+                    mask = ~torch.isnan(override)
+                else:
+                    mask = override > 0
+
+            if override.is_floating_point():
+                invalid_value_mask = ~torch.isfinite(override)
+                if torch.any(invalid_value_mask & mask):
+                    raise ValueError("durations_frames_override must be finite")
+
+            w_ceil = torch.where(mask, override, w_ceil)
+            # 物理的に不正な値の混入を防ぐ
+            w_ceil = torch.clamp_min(w_ceil, 0)
+
         y_lengths = torch.clamp_min(torch.sum(w_ceil, [1, 2]), 1).long()
         y_mask = torch.unsqueeze(commons.sequence_mask(y_lengths, None), 1).to(
             x_mask.dtype
@@ -1275,6 +1330,8 @@ class SynthesizerTrn(nn.Module):
         sdp_ratio: float = 0.0,
         y: torch.Tensor | None = None,
         use_fp16: bool = False,
+        durations_frames_override: torch.Tensor | None = None,
+        durations_frames_override_mask: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, tuple[torch.Tensor, ...]]:
         # Generator 実行前の共通処理
         z, y_mask, g, attn, z_p, m_p, logs_p = self.infer_input_feature(
@@ -1291,6 +1348,8 @@ class SynthesizerTrn(nn.Module):
             sdp_ratio,
             y,
             use_fp16,
+            durations_frames_override,
+            durations_frames_override_mask,
         )
 
         # Generator (Decoder) のみ全体を FP16 / AMP (Automatic Mixed Precision) で実行

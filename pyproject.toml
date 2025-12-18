@@ -45,14 +45,18 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-torch = [
-    "accelerate",
-    "torch>=2.1",
-]
+# どのみち pyopenjtalk-plus で利用されるため必須
+# ただし CPU 版・CUDA 版・DirectML 版でパッケージが分かれており環境依存になるため、直接の依存関係には含めない
+# CPU 版の onnxruntime (無印) と onnxruntime-gpu や onnxruntime-directml は共存できないらしい
 onnxruntime = [
     "onnxruntime; (sys_platform != 'linux' or platform_machine != 'x86_64') and sys_platform != 'win32'",
     "onnxruntime-directml; sys_platform == 'win32'",
     "onnxruntime-gpu; sys_platform == 'linux' and platform_machine == 'x86_64'",
+]
+# PyTorch モデルで推論を行う場合は別途必須
+torch = [
+    "accelerate",
+    "torch>=2.1",
 ]
 
 [project.urls]

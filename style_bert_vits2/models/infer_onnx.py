@@ -4,6 +4,7 @@ from typing import Any
 import numpy as np
 import onnxruntime
 from numpy.typing import NDArray
+from pydantic import BaseModel
 from pyopenjtalk import OpenJTalk
 
 from style_bert_vits2.constants import Languages
@@ -14,6 +15,19 @@ from style_bert_vits2.nlp import (
     extract_bert_feature_onnx,
 )
 from style_bert_vits2.utils import get_onnx_device_options
+
+
+class TokenDurationsResult(BaseModel):
+    """
+    予測されたトークンの長さを秒単位で返す。
+    PyTorch 依存を optional にするため、あえて PyTorch に依存しない infer_onnx.py に記述している。
+    """
+
+    sampling_rate: int
+    hop_length: int
+    token_ids: list[int]
+    durations_frames: list[int]
+    durations_seconds: list[float]
 
 
 def __intersperse(lst: list[Any], item: Any) -> list[Any]:

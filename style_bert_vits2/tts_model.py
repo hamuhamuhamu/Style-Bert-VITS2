@@ -27,6 +27,7 @@ from style_bert_vits2.constants import (
 )
 from style_bert_vits2.logging import logger
 from style_bert_vits2.models.hyper_parameters import HyperParameters
+from style_bert_vits2.models.infer_onnx import TokenDurationsResult
 from style_bert_vits2.voice import adjust_voice
 
 
@@ -363,6 +364,102 @@ class TTSModel:
 
         return data
 
+    def predict_token_durations(
+        self,
+        text: str,
+        language: Languages = Languages.JP,
+        speaker_id: int = 0,
+        reference_audio_path: str | None = None,
+        sdp_ratio: float = DEFAULT_SDP_RATIO,
+        noise_w: float = DEFAULT_NOISEW,
+        assist_text: str | None = None,
+        assist_text_weight: float = DEFAULT_ASSIST_TEXT_WEIGHT,
+        use_assist_text: bool = False,
+        style: str = DEFAULT_STYLE,
+        style_weight: float = DEFAULT_STYLE_WEIGHT,
+        given_phone: list[str] | None = None,
+        given_tone: list[int] | None = None,
+        force_reload_model: bool = False,
+    ) -> TokenDurationsResult:
+        """
+        テキストから内部トークン列の duration（メルフレーム数）を推定する。ONNX 版は今のところ非対応。
+        返り値の duration は常に話速スケール未適用（`length_scale=1.0` 基準）である。
+
+        Args:
+            text (str): 読み上げるテキスト
+            language (Languages, optional): 言語. Defaults to Languages.JP.
+            speaker_id (int, optional): 話者 ID. Defaults to 0.
+            reference_audio_path (str | None, optional): 音声スタイルの参照元の音声ファイルのパス. Defaults to None.
+            sdp_ratio (float, optional): DP と SDP の混合比。0 で DP のみ、1で SDP のみを使用 (値を大きくするとテンポに緩急がつく). Defaults to DEFAULT_SDP_RATIO.
+            noise_w (float, optional): SDP に与えられるノイズ. Defaults to DEFAULT_NOISEW.
+            assist_text (str | None, optional): 感情表現の参照元の補助テキスト. Defaults to None.
+            assist_text_weight (float, optional): 感情表現の補助テキストを適用する強さ. Defaults to DEFAULT_ASSIST_TEXT_WEIGHT.
+            use_assist_text (bool, optional): 音声合成時に感情表現の補助テキストを使用するかどうか. Defaults to False.
+            style (str, optional): 音声スタイル (Neutral, Happy など). Defaults to DEFAULT_STYLE.
+            style_weight (float, optional): 音声スタイルを適用する強さ. Defaults to DEFAULT_STYLE_WEIGHT.
+            given_phone (list[str] | None, optional): 読み上げテキストの読みを表す音素列。指定する場合は given_tone も別途指定が必要. Defaults to None.
+            given_tone (list[int] | None, optional): アクセントのトーンのリスト. Defaults to None.
+            force_reload_model (bool, optional): モデルを強制的に再ロードするかどうか. Defaults to False.
+
+        Returns:
+            TokenDurationsResult: 予測されたトークンの長さ（メルフレーム数）を秒単位で返す
+        """
+
+        logger.info(f"Start predicting token durations from text:\n{text}")
+        if language != "JP" and self.hyper_parameters.version.endswith("JP-Extra"):
+            raise ValueError(
+                "The model is trained with JP-Extra, but the language is not JP"
+            )
+        if reference_audio_path == "":
+            reference_audio_path = None
+        if assist_text == "" or not use_assist_text:
+            assist_text = None
+
+        # スタイルベクトルを取得
+        if reference_audio_path is None:
+            style_id = self.style2id[style]
+            style_vector = self.get_style_vector(style_id, style_weight)
+        else:
+            style_vector = self.get_style_vector_from_audio(
+                reference_audio_path, style_weight
+            )
+
+        if not self.is_onnx_model:
+            import torch
+
+            from style_bert_vits2.models.infer import predict_token_durations
+
+            # force_reload_model が True のとき、メモリ上に保持されているモデルを破棄する
+            if force_reload_model is True:
+                self.net_g = None
+
+            # モデルがロードされていない場合はロードする
+            if self.net_g is None:
+                self.load()
+            assert self.net_g is not None
+
+            with torch.inference_mode():
+                return predict_token_durations(
+                    text=text,
+                    style_vec=style_vector,
+                    sdp_ratio=sdp_ratio,
+                    noise_scale_w=noise_w,
+                    sid=speaker_id,
+                    language=language,
+                    hps=self.hyper_parameters,
+                    net_g=self.net_g,
+                    device=self.device,
+                    assist_text=assist_text,
+                    assist_text_weight=assist_text_weight,
+                    given_phone=given_phone,
+                    given_tone=given_tone,
+                    use_fp16=self.use_fp16,
+                )
+        else:
+            raise NotImplementedError(
+                "predict_token_durations is not supported for ONNX inference"
+            )
+
     def infer(
         self,
         text: str,
@@ -381,6 +478,7 @@ class TTSModel:
         style: str = DEFAULT_STYLE,
         style_weight: float = DEFAULT_STYLE_WEIGHT,
         given_phone: list[str] | None = None,
+        given_phone_length: list[float | None] | None = None,
         given_tone: list[int] | None = None,
         pitch_scale: float = 1.0,
         intonation_scale: float = 1.0,
@@ -407,6 +505,7 @@ class TTSModel:
             style (str, optional): 音声スタイル (Neutral, Happy など). Defaults to DEFAULT_STYLE.
             style_weight (float, optional): 音声スタイルを適用する強さ. Defaults to DEFAULT_STYLE_WEIGHT.
             given_phone (list[str] | None, optional): 読み上げテキストの読みを表す音素列。指定する場合は given_tone も別途指定が必要. Defaults to None.
+            given_phone_length (list[float | None] | None, optional): 音素長（秒）のリスト。None または 0.0 以下は未指定として扱われる。given_phone と同じ長さである必要がある。Defaults to None.
             given_tone (list[int] | None, optional): アクセントのトーンのリスト. Defaults to None.
             pitch_scale (float, optional): ピッチの高さ (1.0 から変更すると若干音質が低下する). Defaults to 1.0.
             intonation_scale (float, optional): 抑揚の平均からの変化幅 (1.0 から変更すると若干音質が低下する). Defaults to 1.0.
@@ -474,6 +573,7 @@ class TTSModel:
                         assist_text_weight=assist_text_weight,
                         style_vec=style_vector,
                         given_phone=given_phone,
+                        given_phone_length=given_phone_length,
                         given_tone=given_tone,
                         use_fp16=self.use_fp16,
                     )
@@ -485,7 +585,7 @@ class TTSModel:
                 with torch.inference_mode():
                     for i, t in enumerate(texts):
                         audios.append(
-                            # given_phone/tone は改行ごとに分割する際は渡さない
+                            # given_phone/given_phone_length/given_tone は改行ごとに分割する際は渡さない
                             infer(
                                 text=t,
                                 sdp_ratio=sdp_ratio,
@@ -517,6 +617,11 @@ class TTSModel:
         # ONNX 推論時
         else:
             from style_bert_vits2.models.infer_onnx import infer_onnx
+
+            if given_phone_length is not None:
+                logger.warning(
+                    "given_phone_length is not supported for ONNX inference and will be ignored."
+                )
 
             # force_reload_model が True のとき、メモリ上に保持されているモデルを破棄する
             if force_reload_model is True:
@@ -553,6 +658,7 @@ class TTSModel:
                 audios = []
                 for i, t in enumerate(texts):
                     audios.append(
+                        # given_phone/given_phone_length/given_tone は改行ごとに分割する際は渡さない
                         infer_onnx(
                             text=t,
                             sdp_ratio=sdp_ratio,
