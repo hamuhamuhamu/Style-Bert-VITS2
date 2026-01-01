@@ -30,7 +30,7 @@ from style_bert_vits2.models.tensor_padding import (
 from style_bert_vits2.nlp import bert_models
 from style_bert_vits2.tts_model import TTSModel, TTSModelHolder
 
-from .utils import save_benchmark_audio, set_random_seeds
+from ..utils import save_benchmark_audio, set_random_seeds
 
 
 # テストテキスト（様々な長さ）
@@ -476,7 +476,7 @@ def run_benchmark(
         print("⚠ メモリ断片化の改善は限定的です")
 
     # 音声ファイル保存の通知
-    audio_dir = Path("tests/wavs/tensor_padding_benchmark")
+    audio_dir = Path(BASE_DIR / "scripts/benchmark/wavs/tensor_padding_benchmark")
     if audio_dir.exists() and any(audio_dir.iterdir()):
         print(f"\n🎧 音声ファイルが保存されました: {audio_dir}")
         print("   - *_without_padding.wav: パディングなしの音声")

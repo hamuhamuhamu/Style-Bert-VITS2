@@ -34,7 +34,7 @@ from style_bert_vits2.models.models_jp_extra import (
 from style_bert_vits2.nlp import bert_models
 from style_bert_vits2.tts_model import TTSModel, TTSModelHolder
 
-from .utils import set_random_seeds
+from ..utils import set_random_seeds
 
 
 @dataclass

@@ -534,7 +534,7 @@ def main():
 
         if analysis:
             # 結果を保存
-            output_dir = Path("tests/profiling_results")
+            output_dir = Path(BASE_DIR / "scripts/research/profiling_results")
             output_dir.mkdir(parents=True, exist_ok=True)
 
             timestamp = int(time.time())

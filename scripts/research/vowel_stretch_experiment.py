@@ -358,7 +358,7 @@ def main() -> None:
         raise RuntimeError("No models found under model_assets")
 
     language = Languages(args.language)
-    output_dir = BASE_DIR / "tests" / "tmp"
+    output_dir = BASE_DIR / "scripts" / "research" / "vowel_stretch_experiment"
     text_tag = _safe_filename(args.text)
 
     logger.info("Starting vowel stretch experiment")

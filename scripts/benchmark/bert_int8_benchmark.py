@@ -29,7 +29,7 @@ from style_bert_vits2.models.infer import infer
 from style_bert_vits2.nlp import bert_models
 from style_bert_vits2.tts_model import TTSModel, TTSModelHolder
 
-from .utils import save_benchmark_audio, set_random_seeds
+from ..utils import save_benchmark_audio, set_random_seeds
 
 
 class TTSBertConfig(TypedDict):
@@ -299,7 +299,7 @@ def run_benchmark(
     model.load()
 
     # 出力ディレクトリを作成
-    output_dir = Path("tests/wavs/bert_int8_benchmark")
+    output_dir = Path(BASE_DIR / "scripts/benchmark/wavs/bert_int8_benchmark")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # BERT 設定

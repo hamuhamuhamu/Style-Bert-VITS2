@@ -42,7 +42,7 @@ from style_bert_vits2.nlp import (
 )
 from style_bert_vits2.tts_model import TTSModel, TTSModelHolder
 
-from .utils import set_random_seeds
+from ..utils import set_random_seeds
 
 
 # 様々な長さのテストテキスト（断片化パターン分析用）
@@ -447,7 +447,7 @@ def run_comprehensive_profiling(
     results = {}
 
     # 出力ディレクトリ作成
-    output_dir = Path("tests/profiling_results")
+    output_dir = Path(BASE_DIR / "scripts/research/profiling_results")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     timestamp = int(time.time())

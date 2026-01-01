@@ -32,7 +32,7 @@ def save_benchmark_audio(
     try:
         from scipy.io import wavfile
 
-        output_dir = Path(f"tests/wavs/{benchmark_name}")
+        output_dir = Path(f"scripts/benchmark/wavs/{benchmark_name}")
         output_dir.mkdir(parents=True, exist_ok=True)
 
         # ファイル名に使えない文字を置換

@@ -190,7 +190,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--dump-json",
         type=str,
         default=None,
-        help="結果を JSON ファイルに保存する（ファイル名のみ指定、出力先は tests/tmp/ 固定）。",
+        help="結果を JSON ファイルに保存する（ファイル名のみ指定、出力先は scripts/research/phoneme_duration_probe/ 固定）。",
     )
     return parser
 
@@ -475,7 +475,9 @@ def main() -> None:
         if not json_filename.endswith(".json"):
             json_filename = f"{json_filename}.json"
 
-        dump_path = BASE_DIR / "tests" / "tmp" / json_filename
+        dump_path = (
+            BASE_DIR / "scripts" / "research" / "phoneme_duration_probe" / json_filename
+        )
         dump_path.parent.mkdir(parents=True, exist_ok=True)
         with dump_path.open("w", encoding="utf-8") as f:
             json.dump(

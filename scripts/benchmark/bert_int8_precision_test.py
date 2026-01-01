@@ -21,7 +21,7 @@ from style_bert_vits2.logging import logger
 from style_bert_vits2.nlp import bert_models, clean_text_with_given_phone_tone
 from style_bert_vits2.nlp.japanese.bert_feature import extract_bert_feature
 
-from .utils import set_random_seeds
+from ..utils import set_random_seeds
 
 
 class BertConfig(TypedDict):

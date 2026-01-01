@@ -31,7 +31,7 @@ from style_bert_vits2.logging import logger
 from style_bert_vits2.models.infer import infer, infer_stream
 from style_bert_vits2.tts_model import TTSModel, TTSModelHolder
 
-from .utils import save_benchmark_audio, set_random_seeds
+from ..utils import save_benchmark_audio, set_random_seeds
 
 
 # 測定用サンプルテキスト
