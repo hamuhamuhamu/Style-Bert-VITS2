@@ -1,5 +1,5 @@
 """
-Usage: .venv/bin/python -m tests.long_inference_benchmark [--device cuda] [--model koharune-ami] [--runs 5]
+Usage: .venv/bin/python -m scripts.benchmark.long_inference_benchmark [--device cuda] [--model koharune-ami] [--runs 5]
 
 Style-Bert-VITS2 長文一括推論のパフォーマンス測定スクリプト
 

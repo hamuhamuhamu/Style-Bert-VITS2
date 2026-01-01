@@ -1,5 +1,5 @@
 """
-Usage: .venv/bin/python -m tests.debug_memory_profiling [--device cuda] [--models 3] [--warmup 5] [--iterations 10]
+Usage: .venv/bin/python -m scripts.research.debug_memory_profiling [--device cuda] [--models 3] [--warmup 5] [--iterations 10]
 
 高精度メモリプロファイリングスクリプト
 

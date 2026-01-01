@@ -1,5 +1,5 @@
 """
-Usage: .venv/bin/python -m tests.streaming_benchmark [--device cuda] [--model koharune-ami] [--runs 3]
+Usage: .venv/bin/python -m scripts.benchmark.streaming_benchmark [--device cuda] [--model koharune-ami] [--runs 3]
 
 このスクリプトは infer.py に実装されている infer() 関数と infer_stream() 関数のパフォーマンスを比較し、
 https://qiita.com/__dAi00/items/970f0fe66286510537dd の結果と同様の測定を行う。

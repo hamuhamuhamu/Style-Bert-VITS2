@@ -1,5 +1,5 @@
 """
-Usage: PYTORCH_CUDA_ALLOC_CONF="backend:cudaMallocAsync,expandable_segments:True" .venv/bin/python -m tests.realistic_memory_profiling [--device cuda] [--iterations 50] [--interval 2] [--enable-padding]
+Usage: PYTORCH_CUDA_ALLOC_CONF="backend:cudaMallocAsync,expandable_segments:True" .venv/bin/python -m scripts.research.realistic_memory_profiling [--device cuda] [--iterations 50] [--interval 2] [--enable-padding]
 
 実環境再現型メモリプロファイリングスクリプト
 
@@ -344,8 +344,27 @@ def simulate_production_usage(
                 torch.cuda.empty_cache()
                 gc.collect()
 
-            except Exception as e:
-                logger.error(f"エラー発生: {e}")
+            except Exception as ex:
+                # 非OOM例外の場合、詳細をログに記録し、イテレーションを記録してから処理を決定する
+                logger.error(
+                    f"非OOM例外発生: イテレーション {iteration * batch_simulation + batch_idx}",
+                    exc_info=ex,
+                )
+                # 例外の詳細を記録
+                memory_after = profiler.get_memory_stats()
+                profiler.record_iteration(
+                    iteration * batch_simulation + batch_idx,
+                    model_name,
+                    text,
+                    -2.0,  # 非OOMエラーを示す（OOMは-1.0）
+                    memory_before,
+                    memory_after,
+                )
+                # 致命的な例外（KeyboardInterrupt、SystemExitなど）は再発生させる
+                if isinstance(ex, (KeyboardInterrupt, SystemExit)):
+                    raise
+                # その他の例外はログに記録して継続（実環境では一部のリクエストが失敗しても継続する）
+                logger.warning(f"例外を記録して継続します: {type(ex).__name__}: {ex}")
 
         # インターバルを置く（実環境の時間経過を模倣）
         if iteration < num_iterations - 1:
@@ -405,8 +424,14 @@ def analyze_results(
             "peak_fragmentation": max(
                 r["memory_after"]["fragmentation"] for r in results
             ),
-            "average_inference_time": np.mean(
-                [r["inference_time"] for r in results if r["inference_time"] > 0]
+            "average_inference_time": (
+                np.mean(valid_times)
+                if (
+                    valid_times := [
+                        r["inference_time"] for r in results if r["inference_time"] > 0
+                    ]
+                )
+                else 0.0
             ),
         },
         "fragmentation_progression": fragmentation_progression,

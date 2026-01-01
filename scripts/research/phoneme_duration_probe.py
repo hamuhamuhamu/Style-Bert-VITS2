@@ -1,5 +1,5 @@
 """
-Usage: .venv/bin/python -m tests.phoneme_duration_probe [--model koharune-ami] [--text "今日はいい天気ですね。"] [--language JP]
+Usage: .venv/bin/python -m scripts.research.phoneme_duration_probe [--model koharune-ami] [--text "今日はいい天気ですね。"] [--language JP]
     [--speaker-id 0] [--style Neutral] [--style-weight 1.0] [--length-scale 1.0] [--sdp-ratio 0.0] [--noise-scale-w 0.8]
     [--device cpu] [--runs 1] [--seed 1234] [--max-tokens 80] [--dump-json output.json]
 

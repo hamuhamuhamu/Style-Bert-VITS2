@@ -1,5 +1,5 @@
 """
-Usage: .venv/bin/python -m tests.vowel_stretch_experiment --text '今日はいい天気ですね。'
+Usage: .venv/bin/python -m scripts.research.vowel_stretch_experiment --text '今日はいい天気ですね。'
 
 指定テキストに対して、母音トークンの推定 duration のみを一定倍率で引き延ばした音声を生成し、
 通常生成時と比較して WAV 長がどれだけ変化するかを調査するスクリプト。

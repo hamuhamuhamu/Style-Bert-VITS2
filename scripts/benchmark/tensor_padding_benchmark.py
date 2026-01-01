@@ -1,5 +1,5 @@
 """
-Usage: PYTORCH_CUDA_ALLOC_CONF="backend:cudaMallocAsync,expandable_segments:True" .venv/bin/python -m tests.tensor_padding_benchmark [--device cuda] [--model koharune-ami] [--iterations 30]
+Usage: PYTORCH_CUDA_ALLOC_CONF="backend:cudaMallocAsync,expandable_segments:True" .venv/bin/python -m scripts.benchmark.tensor_padding_benchmark [--device cuda] [--model koharune-ami] [--iterations 30]
 
 メモリ効率化テンソルパディングのベンチマークスクリプト
 """
@@ -381,7 +381,7 @@ def run_benchmark(
     for i in range(num_iterations):
         text = TEST_TEXTS[i % len(TEST_TEXTS)]
         # 最後の数回のみ音声を保存（主観評価用）
-        save_audio = i >= max(0, num_iterations - len(TEST_TEXTS))
+        save_audio = i >= max(0, num_iterations - min(num_iterations, len(TEST_TEXTS)))
         inference_time, _, _ = measure_inference_performance(
             model,
             text,

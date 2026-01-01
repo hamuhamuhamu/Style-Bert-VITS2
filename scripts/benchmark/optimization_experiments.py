@@ -1,5 +1,5 @@
 """
-Usage: .venv/bin/python -m tests.optimization_experiments [--device cuda:0] [--model-name 10-hinataanna] [--num-runs 3]
+Usage: .venv/bin/python -m scripts.benchmark.optimization_experiments [--device cuda:0] [--model-name 10-hinataanna] [--num-runs 3]
 
 Style-Bert-VITS2 の推論高速化施策を比較検証するためのスクリプト。
 
@@ -469,19 +469,20 @@ def run_experiment_attention_cache(
     # 施策適用
     attentions.MultiHeadAttention.forward = forward_no_cache  # type: ignore[assignment]
     optimized_metrics: list[InferenceMetrics] = []
-    for i in range(num_runs):
-        set_global_seed(SEED_BASELINE + 100 + i)
-        metrics, wave = run_single_inference(
-            model, text, style_name, speaker_id, device
-        )
-        max_abs_diff, mean_abs_diff = compute_waveform_diff(baseline_waves[i], wave)
-        metrics.max_abs_diff = max_abs_diff
-        metrics.mean_abs_diff = mean_abs_diff
-        optimized_metrics.append(metrics)
-    summarize_metrics("attn_cache_disabled", optimized_metrics)
-
-    # 元に戻す
-    attentions.MultiHeadAttention.forward = original_forward  # type: ignore[assignment]
+    try:
+        for i in range(num_runs):
+            set_global_seed(SEED_BASELINE + 100 + i)
+            metrics, wave = run_single_inference(
+                model, text, style_name, speaker_id, device
+            )
+            max_abs_diff, mean_abs_diff = compute_waveform_diff(baseline_waves[i], wave)
+            metrics.max_abs_diff = max_abs_diff
+            metrics.mean_abs_diff = mean_abs_diff
+            optimized_metrics.append(metrics)
+        summarize_metrics("attn_cache_disabled", optimized_metrics)
+    finally:
+        # 元に戻す（例外発生時も必ず実行される）
+        attentions.MultiHeadAttention.forward = original_forward  # type: ignore[assignment]
 
 
 def patch_flow_chunk_forward() -> tuple[
@@ -559,58 +560,59 @@ def run_experiment_flow_chunk(
 
     original_forward_base, original_forward_extra = patch_flow_chunk_forward()
 
-    text = choose_fixed_text()
-    style_name, speaker_id = get_default_style_and_speaker(model)
+    try:
+        text = choose_fixed_text()
+        style_name, speaker_id = get_default_style_and_speaker(model)
 
-    # 事前に 1 回だけウォームアップして BERT ロードなどの一過性オーバーヘッドを除外する
-    set_global_seed(SEED_BASELINE + 199)
-    _warmup_metrics, _warmup_wave = run_single_inference(
-        model,
-        text,
-        style_name,
-        speaker_id,
-        device,
-    )
-    _ = _warmup_metrics
-    _ = _warmup_wave
+        # 事前に 1 回だけウォームアップして BERT ロードなどの一過性オーバーヘッドを除外する
+        set_global_seed(SEED_BASELINE + 199)
+        _warmup_metrics, _warmup_wave = run_single_inference(
+            model,
+            text,
+            style_name,
+            speaker_id,
+            device,
+        )
+        _ = _warmup_metrics
+        _ = _warmup_wave
 
-    # 比較するチャンクサイズの候補
-    chunk_sizes = [1024, 768, 512]
-    baseline_wave: NDArray[Any] | None = None
+        # 比較するチャンクサイズの候補
+        chunk_sizes = [1024, 768, 512]
+        baseline_wave: NDArray[Any] | None = None
 
-    for idx, chunk_size in enumerate(chunk_sizes):
-        set_flow_chunk_size(net_g, chunk_size)
-        metrics_list: list[InferenceMetrics] = []
-        waves: list[NDArray[Any]] = []
-        for i in range(num_runs):
-            set_global_seed(SEED_BASELINE + 200 + i)
-            metrics, wave = run_single_inference(
-                model,
-                text,
-                style_name,
-                speaker_id,
-                device,
-            )
-            metrics_list.append(metrics)
-            waves.append(wave)
-
-        # 最初のチャンクサイズを基準として波形差分を計算する
-        if idx == 0:
-            baseline_wave = waves[0]
-        if baseline_wave is not None:
-            for wave_idx, m in enumerate(metrics_list):
-                max_abs_diff, mean_abs_diff = compute_waveform_diff(
-                    baseline_wave,
-                    waves[wave_idx],
+        for idx, chunk_size in enumerate(chunk_sizes):
+            set_flow_chunk_size(net_g, chunk_size)
+            metrics_list: list[InferenceMetrics] = []
+            waves: list[NDArray[Any]] = []
+            for i in range(num_runs):
+                set_global_seed(SEED_BASELINE + 200 + i)
+                metrics, wave = run_single_inference(
+                    model,
+                    text,
+                    style_name,
+                    speaker_id,
+                    device,
                 )
-                m.max_abs_diff = max_abs_diff
-                m.mean_abs_diff = mean_abs_diff
+                metrics_list.append(metrics)
+                waves.append(wave)
 
-        summarize_metrics(f"flow_chunk_{chunk_size}", metrics_list)
+            # 最初のチャンクサイズを基準として波形差分を計算する
+            if idx == 0:
+                baseline_wave = waves[0]
+            if baseline_wave is not None:
+                for wave_idx, m in enumerate(metrics_list):
+                    max_abs_diff, mean_abs_diff = compute_waveform_diff(
+                        baseline_wave,
+                        waves[wave_idx],
+                    )
+                    m.max_abs_diff = max_abs_diff
+                    m.mean_abs_diff = mean_abs_diff
 
-    # 元に戻す
-    models.TransformerCouplingBlock.forward = original_forward_base  # type: ignore[assignment]
-    models_jp_extra.TransformerCouplingBlock.forward = original_forward_extra  # type: ignore[assignment]
+            summarize_metrics(f"flow_chunk_{chunk_size}", metrics_list)
+    finally:
+        # 元に戻す（例外発生時も必ず実行される）
+        models.TransformerCouplingBlock.forward = original_forward_base  # type: ignore[assignment]
+        models_jp_extra.TransformerCouplingBlock.forward = original_forward_extra  # type: ignore[assignment]
 
 
 def parse_args() -> argparse.Namespace:

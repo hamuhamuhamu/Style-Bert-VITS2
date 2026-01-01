@@ -1,5 +1,5 @@
 """
-Usage: .venv/bin/python -m tests.bert_int8_precision_test [--device cuda] [--warmup-runs 3] [--test-runs 5]
+Usage: .venv/bin/python -m scripts.benchmark.bert_int8_precision_test [--device cuda] [--warmup-runs 3] [--test-runs 5]
 
 BERT 8bit 量子化精度評価テストスクリプト
 
