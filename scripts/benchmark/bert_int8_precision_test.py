@@ -66,7 +66,7 @@ def measure_bert_inference_time(
             norm_text, _, _, word2ph, sep_text, _, _ = clean_text_with_given_phone_tone(
                 text,
                 Languages.JP,
-                use_jp_extra=False,
+                use_jp_extra=True,
                 raise_yomi_error=False,
             )
 
@@ -88,7 +88,7 @@ def measure_bert_inference_time(
             norm_text, _, _, word2ph, sep_text, _, _ = clean_text_with_given_phone_tone(
                 text,
                 Languages.JP,
-                use_jp_extra=False,
+                use_jp_extra=True,
                 raise_yomi_error=False,
             )
 

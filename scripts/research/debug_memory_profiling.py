@@ -155,7 +155,10 @@ def profile_bert_only(
             with record_function(f"bert_warmup_{i}"):
                 norm_text, _, _, word2ph, sep_text, _, _ = (
                     clean_text_with_given_phone_tone(
-                        text, Languages.JP, use_jp_extra=True, raise_yomi_error=False
+                        text,
+                        Languages.JP,
+                        use_jp_extra=True,
+                        raise_yomi_error=False,
                     )
                 )
                 _ = extract_bert_feature(
@@ -179,7 +182,10 @@ def profile_bert_only(
 
                 norm_text, _, _, word2ph, sep_text, _, _ = (
                     clean_text_with_given_phone_tone(
-                        text, Languages.JP, use_jp_extra=True, raise_yomi_error=False
+                        text,
+                        Languages.JP,
+                        use_jp_extra=True,
+                        raise_yomi_error=False,
                     )
                 )
 

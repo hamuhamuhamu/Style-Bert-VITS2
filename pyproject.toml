@@ -144,8 +144,8 @@ full = [
 ## Usage: uv run task <task-name>
 [tool.taskipy.tasks]
 ## リント・フォーマット
-lint = "ruff check . ; pyright"
-format = "ruff check --fix . && ruff format . ; pyright"
+lint = "ruff check --fix . ; pyright"
+format = "ruff format ."
 typecheck = "pyright"
 ## 正規化テスト
 test-normalizer = "pytest -s tests/test_normalizer.py"
