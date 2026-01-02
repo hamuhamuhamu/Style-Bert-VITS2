@@ -126,6 +126,7 @@ train = [
     { include-group = "core" },
     "anime-speaker-embedding",
     "librosa==0.9.2",
+    "matplotlib",
     "pyannote.audio>=3.1.0",
     "pyloudnorm",
     "tensorboard",
@@ -268,6 +269,7 @@ pythonPlatform = "All"
 # インクルードするパッケージパス
 include = [
     "style_bert_vits2/",
+    "scripts/",
     "tests/",
 ]
 # 除外するパス
