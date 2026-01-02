@@ -1243,12 +1243,16 @@ def train_and_evaluate(
 
         # 勾配累積を使用する場合は、累積ステップの最初でのみ zero_grad() を呼ぶ
         is_first_accumulation_step = (batch_idx % gradient_accumulation_steps) == 0
-        is_last_accumulation_step = (
-            (batch_idx + 1) % gradient_accumulation_steps
-        ) == 0
+        is_last_accumulation_step = ((batch_idx + 1) % gradient_accumulation_steps) == 0
         should_step = is_last_accumulation_step or not is_accumulating
 
         # Discriminator
+        if is_first_accumulation_step:
+            optim_d.zero_grad()
+            if net_dur_disc is not None:
+                optim_dur_disc.zero_grad()
+            if net_wd is not None:
+                optim_wd.zero_grad()
         y_d_hat_r, y_d_hat_g, _, _ = net_d(y, y_hat.detach())
         with autocast(
             device_type="cuda",
@@ -1291,13 +1295,6 @@ def train_and_evaluate(
                     y.detach().squeeze(1), y_hat.detach().squeeze(1)
                 ).mean()
 
-        if is_first_accumulation_step:
-            optim_d.zero_grad()
-            if net_dur_disc is not None:
-                optim_dur_disc.zero_grad()
-            if net_wd is not None:
-                optim_wd.zero_grad()
-
         loss_disc_scaled = (
             loss_disc_all / gradient_accumulation_steps
             if is_accumulating
@@ -1318,7 +1315,9 @@ def train_and_evaluate(
                 else loss_dur_disc_all
             )
             net_dur_no_sync = (
-                net_dur_disc.no_sync if hasattr(net_dur_disc, "no_sync") else nullcontext
+                net_dur_disc.no_sync
+                if hasattr(net_dur_disc, "no_sync")
+                else nullcontext
             )
             with (
                 net_dur_no_sync()
@@ -1331,7 +1330,9 @@ def train_and_evaluate(
             loss_slm_scaled = (
                 loss_slm / gradient_accumulation_steps if is_accumulating else loss_slm
             )
-            net_wd_no_sync = net_wd.no_sync if hasattr(net_wd, "no_sync") else nullcontext
+            net_wd_no_sync = (
+                net_wd.no_sync if hasattr(net_wd, "no_sync") else nullcontext
+            )
             with (
                 net_wd_no_sync()
                 if is_accumulating and not is_last_accumulation_step
