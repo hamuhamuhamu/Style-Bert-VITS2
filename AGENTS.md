@@ -185,6 +185,11 @@ Data/
 
 ## 開発時の注意点
 
+### 型チェック
+
+Pyright による型チェックを導入している。新規で実装した箇所には必ず Type Hint を付与すること。  
+NDArray の型は from numpy.typing import NDArray を使って定義すること。np.ndarray を使わない。
+
 ### 言語対応
 
 日本語、中国語、英語の多言語対応。各言語ごとに異なる BERT モデルと前処理パイプラインを使用。

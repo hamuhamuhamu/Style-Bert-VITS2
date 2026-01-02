@@ -7,6 +7,7 @@
 
 from enum import Enum
 from re import findall, fullmatch
+from typing import Any
 
 from pydantic import BaseModel, Field, validator
 
@@ -42,7 +43,8 @@ class UserDictWord(BaseModel):
         validate_assignment = True
 
     @validator("surface")
-    def convert_to_zenkaku(cls, surface):
+    @classmethod
+    def convert_to_zenkaku(cls, surface: str) -> str:
         return surface.translate(
             str.maketrans(
                 "".join(chr(0x21 + i) for i in range(94)),
@@ -51,7 +53,8 @@ class UserDictWord(BaseModel):
         )
 
     @validator("pronunciation", pre=True)
-    def check_is_katakana(cls, pronunciation):
+    @classmethod
+    def check_is_katakana(cls, pronunciation: str) -> str:
         if not fullmatch(r"[ァ-ヴー]+", pronunciation):
             raise ValueError("発音は有効なカタカナでなくてはいけません。")
         sutegana = ["ァ", "ィ", "ゥ", "ェ", "ォ", "ャ", "ュ", "ョ", "ヮ", "ッ"]
@@ -75,7 +78,10 @@ class UserDictWord(BaseModel):
         return pronunciation
 
     @validator("mora_count", pre=True, always=True)
-    def check_mora_count_and_accent_type(cls, mora_count, values):
+    @classmethod
+    def check_mora_count_and_accent_type(
+        cls, mora_count: int | None, values: dict[str, Any]
+    ) -> int | None:
         if "pronunciation" not in values or "accent_type" not in values:
             # 適切な場所でエラーを出すようにする
             return mora_count

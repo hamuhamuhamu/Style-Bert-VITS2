@@ -42,7 +42,7 @@ def torch_device_to_onnx_providers(
 def get_onnx_device_options(
     onnx_session: onnxruntime.InferenceSession,
     onnx_providers: Sequence[str | tuple[str, dict[str, Any]]],
-) -> tuple[str, int, onnxruntime.RunOptions]:
+) -> tuple[str, int, Any]:
     """
     ONNX 推論時のデバイス関連のオプションを取得する
 
