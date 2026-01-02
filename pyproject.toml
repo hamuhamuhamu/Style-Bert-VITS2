@@ -1,14 +1,14 @@
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["uv_build>=0.9.21,<0.10.0"]
+build-backend = "uv_build"
 
 [project]
 name = "style-bert-vits2"
-dynamic = ["version"]
+version = "2.7.0"
 description = "Style-Bert-VITS2: Bert-VITS2 with more controllable voice styles."
 readme = "README.md"
 requires-python = ">=3.10"
-license = "AGPL-3.0"
+license = "AGPL-3.0-only"
 keywords = []
 authors = [
     { name = "litagin02", email = "139731664+litagin02@users.noreply.github.com" },
@@ -22,6 +22,7 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: CPython",
 ]
 dependencies = [
+    "aivmlib",
     "cmudict",
     "cn2an",
     "e2k>=0.6.1",
@@ -29,9 +30,10 @@ dependencies = [
     "jaconv",
     "jieba",
     "loguru",
+    # nltk 3.8.1 より新しいバージョンでは、追加のモデルダウンロードが必要になったり
+    # 速度低下などの問題が発生するため、意図的に固定している
     "nltk<=3.8.1",
     "num2words",
-    "numba",
     "numpy<2",
     "pydantic>=2.0",
     "pyopenjtalk-plus",
@@ -44,118 +46,158 @@ dependencies = [
     "transformers<4.50.0",
 ]
 
+# ライブラリ利用者向けのオプション依存関係
+## バージョンやバリアントは利用者側で柔軟に指定できるよう、最低限の制約のみ記載
 [project.optional-dependencies]
-# どのみち pyopenjtalk-plus で利用されるため必須
-# ただし CPU 版・CUDA 版・DirectML 版でパッケージが分かれており環境依存になるため、直接の依存関係には含めない
-# CPU 版の onnxruntime (無印) と onnxruntime-gpu や onnxruntime-directml は共存できないらしい
+# ONNX Runtime はどのみち pyopenjtalk-plus で利用されるため必須
+## ただし CPU 版・CUDA 版・DirectML 版でパッケージが分かれており環境依存になるため、直接の依存関係には含めない
+## CPU 版の onnxruntime (無印) と onnxruntime-gpu や onnxruntime-directml は共存できない
 onnxruntime = [
     "onnxruntime; (sys_platform != 'linux' or platform_machine != 'x86_64') and sys_platform != 'win32'",
     "onnxruntime-directml; sys_platform == 'win32'",
     "onnxruntime-gpu; sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
 # PyTorch モデルで推論を行う場合は別途必須
+## numba は monotonic_alignment.py で使用されている
 torch = [
     "accelerate",
+    "numba",
     "torch>=2.1",
 ]
 
-[project.urls]
-Documentation = "https://github.com/litagin02/Style-Bert-VITS2#readme"
-Issues = "https://github.com/litagin02/Style-Bert-VITS2/issues"
-Source = "https://github.com/litagin02/Style-Bert-VITS2"
+# 単体利用時の依存関係グループ
+[dependency-groups]
+## 単体利用時の共通依存関係
+## ONNX Runtime と PyTorch のバージョン・バリアントを固定し、開発ツールも含む
+## Usage: uv sync (or: uv sync --group core)
+core = [
+    # ONNX Runtime 関連 (project.optional-dependencies.onnxruntime に相当)
+    # 必須依存関係なので、単体利用時はインストールされるバリアントを上記と同じロジックで固定する
+    "onnxruntime; (sys_platform != 'linux' or platform_machine != 'x86_64') and sys_platform != 'win32'",
+    "onnxruntime-directml; sys_platform == 'win32'",
+    "onnxruntime-gpu; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    # PyTorch 関連 (project.optional-dependencies.torch に相当)
+    # 単体利用で ONNX 版推論だけ回すユースケースは極めて考えづらいので、常に PyTorch 関連も必須依存関係に含める
+    # PyTorch のバリアントは tool.uv.sources で torch / torchaudio のソース指定で固定している
+    "accelerate",
+    "numba",
+    "torch<2.9",
+    # 開発関連ツール
+    # 比較的サイズが小さいため core に含める
+    "coverage[toml]>=6.5",
+    "pytest",
+    "pyright",
+    "ruff",
+    "scipy",
+    "taskipy",
+]
+## ONNX 変換ツールの依存関係 (convert_onnx.py, convert_bert_onnx.py)
+## Usage: uv sync --group tools
+tools = [
+    { include-group = "core" },
+    "onnx",
+    "onnxconverter-common",
+    "onnxsim-prebuilt",
+    "protobuf==4.25",
+    "rich",
+]
+## FastAPI サーバーの依存関係 (server_fastapi.py, server_editor.py)
+## Usage: uv sync --group server
+server = [
+    { include-group = "core" },
+    "fastapi",
+    "GPUtil",
+    "psutil",
+    "requests",
+    "uvicorn",
+]
+## Gradio WebUI の依存関係 (app.py, gradio_tabs/*)
+## Usage: uv sync --group webui
+## Usage (学習も行う場合): uv sync --group webui --group train
+webui = [
+    { include-group = "core" },
+    "gradio>=4.32",
+    "pyyaml",
+    "umap-learn",
+]
+## 学習・前処理の依存関係 (train_ms*.py, style_gen.py, resample.py 等)
+## Usage: uv sync --group train
+train = [
+    { include-group = "core" },
+    "anime-speaker-embedding",
+    "librosa==0.9.2",
+    "pyannote.audio>=3.1.0",
+    "pyloudnorm",
+    "tensorboard",
+    "torchaudio<2.9",
+]
+## ここまでの依存関係を全てインストールするグループ
+## Usage: uv sync --group full
+full = [
+    { include-group = "tools" },
+    { include-group = "server" },
+    { include-group = "webui" },
+    { include-group = "train" },
+]
 
-[tool.hatch.version]
-path = "style_bert_vits2/constants.py"
+# タスクランナーのタスク定義
+## Usage: uv run task <task-name>
+[tool.taskipy.tasks]
+## リント・フォーマット
+lint = "ruff check . ; pyright"
+format = "ruff check --fix . && ruff format . ; pyright"
+typecheck = "pyright"
+## 正規化テスト
+test-normalizer = "pytest -s tests/test_normalizer.py"
+## PyTorch 推論テスト
+test = "pytest -s tests/test_main.py::test_synthesize_cpu"
+test-cuda = "pytest -s tests/test_main.py::test_synthesize_cuda"
+## ONNX 推論テスト
+test-onnx = "pytest -s tests/test_main.py::test_synthesize_onnx_cpu"
+test-onnx-cuda = "pytest -s tests/test_main.py::test_synthesize_onnx_cuda"
+test-onnx-tensorrt = "pytest -s tests/test_main.py::test_synthesize_onnx_tensorrt"
+test-onnx-directml = "pytest -s tests/test_main.py::test_synthesize_onnx_directml"
+test-onnx-coreml = "pytest -s tests/test_main.py::test_synthesize_onnx_coreml"
 
-[tool.hatch.build.targets.sdist]
-only-include = [
-    ".vscode",
+# uv sync 実行時にデフォルトで core グループがインストールされるようにする
+[tool.uv]
+default-groups = ["core"]
+
+# ビルド設定
+[tool.uv.build-backend]
+# ルートにパッケージがあるため module-root を空にする
+module-root = ""
+# sdist に含めるファイル（pyproject.toml とモジュール本体は自動で含まれる）
+source-include = [
+    ".vscode/**",
     "dict_data/default.csv",
-    "docs",
-    "style_bert_vits2",
-    "tests",
+    "docs/**",
+    "tests/**",
     "LGPL_LICENSE",
     "LICENSE",
-    "pyproject.toml",
     "README.md",
 ]
-exclude = [".git", ".gitignore", ".gitattributes"]
-
-[tool.hatch.build.targets.wheel]
-packages = ["style_bert_vits2"]
-
-# for PyTorch inference
-[tool.hatch.envs.test]
-dependencies = [
-    "coverage[toml]>=6.5",
-    "pytest",
-    "scipy",
+# sdist から除外するファイル
+source-exclude = [
+    ".git",
+    ".gitignore",
+    ".gitattributes",
 ]
-features = ["torch"]
-[tool.hatch.envs.test.scripts]
-# Usage: `hatch run test:test`
-test = "pytest -s tests/test_main.py::test_synthesize_cpu"
-# Usage: `hatch run test:test-cuda`
-test-cuda = "pytest -s tests/test_main.py::test_synthesize_cuda"
-# Usage: `hatch run test:coverage`
-test-cov = "coverage run -m pytest -s tests/test_main.py::test_synthesize_cpu"
-# Usage: `hatch run test:cov-report`
-cov-report = ["- coverage combine", "coverage report"]
-# Usage: `hatch run test:cov`
-cov = ["test-cov", "cov-report"]
-[[tool.hatch.envs.test.matrix]]
-python = ["3.10", "3.11"]
 
-# for ONNX inference (without PyTorch dependency)
-[tool.hatch.envs.test-onnx]
-dependencies = [
-    "coverage[toml]>=6.5",
-    "pytest",
-    "scipy",
+# torch / torchaudio のソース指定
+# Windows x64・Linux x64: CUDA 12.6 版
+# macOS・その他: PyPI から CPU 版
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+[tool.uv.sources]
+e2k = { git = "https://github.com/tsukumijima/e2k.git", branch = "master" }
+torch = [
+    { index = "pytorch-cu126", marker = "(sys_platform == 'linux' and platform_machine == 'x86_64') or sys_platform == 'win32'" },
 ]
-features = ["onnxruntime"]
-[tool.hatch.envs.test-onnx.scripts]
-# Usage: `hatch run test-onnx:test`
-test = "pytest -s tests/test_main.py::test_synthesize_onnx_cpu"
-# Usage: `hatch run test-onnx:test-cuda`
-test-cuda = "pytest -s tests/test_main.py::test_synthesize_onnx_cuda"
-# Usage: `hatch run test-onnx:test-tensorrt`
-test-tensorrt = "pytest -s tests/test_main.py::test_synthesize_onnx_tensorrt"
-# Usage: `hatch run test-onnx:test-directml`
-test-directml = "pytest -s tests/test_main.py::test_synthesize_onnx_directml"
-# Usage: `hatch run test-onnx:test-coreml`
-test-coreml = "pytest -s tests/test_main.py::test_synthesize_onnx_coreml"
-# Usage: `hatch run test-onnx:coverage`
-test-cov = "coverage run -m pytest -s tests/test_main.py::test_synthesize_onnx_cpu"
-# Usage: `hatch run test-onnx:cov-report`
-cov-report = ["- coverage combine", "coverage report"]
-# Usage: `hatch run test-onnx:cov`
-cov = ["test-cov", "cov-report"]
-[[tool.hatch.envs.test-onnx.matrix]]
-python = ["3.10", "3.11"]
-
-[tool.hatch.envs.test-normalizer]
-dependencies = ["pytest"]
-[tool.hatch.envs.test-normalizer.scripts]
-# Usage: `hatch run test-normalizer:test`
-test = "pytest -s tests/test_normalizer.py"
-
-[tool.hatch.envs.style]
-dependencies = [
-    "ruff",
-    "pyright",
-    "pytest",
-    "scipy",
-]
-features = ["torch", "onnxruntime"]
-[tool.hatch.envs.style.scripts]
-# Usage: `hatch run style:check`
-check = [
-    "ruff check . ; pyright",
-]
-# Usage: `hatch run style:fmt`
-fmt = [
-    "ruff check --fix . && ruff format . ; pyright",
+torchaudio = [
+    { index = "pytorch-cu126", marker = "(sys_platform == 'linux' and platform_machine == 'x86_64') or sys_platform == 'win32'" },
 ]
 
 [tool.coverage.run]

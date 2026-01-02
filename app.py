@@ -27,9 +27,9 @@ update_dict()
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--device", type=str, default="cuda")
-parser.add_argument("--host", type=str, default="127.0.0.1")
+parser.add_argument("--host", type=str, default="0.0.0.0")
 parser.add_argument("--port", type=int, default=None)
-parser.add_argument("--no_autolaunch", action="store_true")
+parser.add_argument("--no_autolaunch", action="store_true", default=True)
 parser.add_argument("--share", action="store_true")
 # parser.add_argument("--skip_default_models", action="store_true")
 
