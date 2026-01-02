@@ -17,6 +17,9 @@ from style_bert_vits2.models.models import SynthesizerTrn
 from style_bert_vits2.models.models_jp_extra import (
     SynthesizerTrn as SynthesizerTrnJPExtra,
 )
+from style_bert_vits2.models.models_nanairo import (
+    SynthesizerTrn as SynthesizerTrnNanairo,
+)
 from style_bert_vits2.models.tensor_padding import pad_sequence_tensor
 from style_bert_vits2.nlp import (
     clean_text_with_given_phone_tone,
@@ -52,9 +55,43 @@ def get_net_g(
     device: str,
     hps: HyperParameters,
     use_fp16: bool = False,
-) -> SynthesizerTrn | SynthesizerTrnJPExtra:
+) -> SynthesizerTrn | SynthesizerTrnJPExtra | SynthesizerTrnNanairo:
     with EmptyInitOnDevice(device):
-        if version.endswith("JP-Extra"):
+        if version.endswith("Nanairo"):
+            logger.info("Using Nanairo model")
+            net_g = SynthesizerTrnNanairo(
+                n_vocab=len(SYMBOLS),
+                spec_channels=hps.data.filter_length // 2 + 1,
+                segment_size=hps.train.segment_size // hps.data.hop_length,
+                n_speakers=hps.data.n_speakers,
+                # hps.model 以下のすべての値を引数に渡す
+                use_spk_conditioned_encoder=hps.model.use_spk_conditioned_encoder,
+                use_noise_scaled_mas=hps.model.use_noise_scaled_mas,
+                use_mel_posterior_encoder=hps.model.use_mel_posterior_encoder,
+                use_duration_discriminator=hps.model.use_duration_discriminator,
+                use_wavlm_discriminator=hps.model.use_wavlm_discriminator,
+                inter_channels=hps.model.inter_channels,
+                hidden_channels=hps.model.hidden_channels,
+                filter_channels=hps.model.filter_channels,
+                n_heads=hps.model.n_heads,
+                n_layers=hps.model.n_layers,
+                kernel_size=hps.model.kernel_size,
+                p_dropout=hps.model.p_dropout,
+                resblock=hps.model.resblock,
+                resblock_kernel_sizes=hps.model.resblock_kernel_sizes,
+                resblock_dilation_sizes=hps.model.resblock_dilation_sizes,
+                upsample_rates=hps.model.upsample_rates,
+                upsample_initial_channel=hps.model.upsample_initial_channel,
+                upsample_kernel_sizes=hps.model.upsample_kernel_sizes,
+                n_layers_q=hps.model.n_layers_q,
+                use_spectral_norm=hps.model.use_spectral_norm,
+                gin_channels=hps.model.gin_channels,
+                slm=hps.model.slm,
+                use_external_speaker_adapter=hps.model.use_external_speaker_adapter,
+                external_speaker_embedding_dim=hps.model.external_speaker_embedding_dim,
+                external_speaker_adapter_hidden_dim=hps.model.external_speaker_adapter_hidden_dim,
+            ).to(device)
+        elif version.endswith("JP-Extra"):
             logger.info("Using JP-Extra model")
             net_g = SynthesizerTrnJPExtra(
                 n_vocab=len(SYMBOLS),
@@ -157,13 +194,13 @@ def get_text(
 ) -> tuple[
     torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
 ]:
-    use_jp_extra = hps.version.endswith("JP-Extra")
+    is_jp_extra_like_model = hps.is_jp_extra_like_model()
     norm_text, phone, tone, word2ph, sep_text, _, _ = clean_text_with_given_phone_tone(
         text,
         language_str,
         given_phone=given_phone,
         given_tone=given_tone,
-        use_jp_extra=use_jp_extra,
+        use_jp_extra=is_jp_extra_like_model,
         # 推論時のみ呼び出されるので、raise_yomi_error は False に設定
         raise_yomi_error=False,
         jtalk=jtalk,
@@ -189,7 +226,7 @@ def get_text(
     del word2ph
     assert bert_ori.shape[-1] == len(phone), phone
 
-    if use_jp_extra is True:
+    if is_jp_extra_like_model is True:
         # 日本語のみに対応した JP-Extra モデルでは ja_bert のみが推論時に参照され、他言語の特徴量は推論時には一切利用されない
         # 空テンソルは CPU 上で作成し、GPU 転送を避けることで VRAM 使用量とメモリ断片化を削減
         empty_tensor = torch.empty(0, 0)  # CPU 上で作成
@@ -373,7 +410,7 @@ def predict_token_durations(
     sid: int,
     language: Languages,
     hps: HyperParameters,
-    net_g: SynthesizerTrn | SynthesizerTrnJPExtra,
+    net_g: SynthesizerTrn | SynthesizerTrnJPExtra | SynthesizerTrnNanairo,
     device: str,
     skip_start: bool = False,
     skip_end: bool = False,
@@ -405,7 +442,7 @@ def predict_token_durations(
         TokenDurationsResult: 予測されたトークンの長さ（メルフレーム数）を秒単位で返す
     """
 
-    is_jp_extra = hps.version.endswith("JP-Extra")
+    is_jp_extra_like_model = hps.is_jp_extra_like_model()
 
     with torch.inference_mode():
         (
@@ -445,22 +482,34 @@ def predict_token_durations(
 
         # Encoder 入力の組み立てのみ、JP-Extra と通常モデルでシグネチャが異なるため分岐する
         # それ以外（SDP/DP の呼び出しや後続計算）は同一 API のため共通化する
-        if is_jp_extra:
+        if is_jp_extra_like_model:
             if use_fp16 is True:
                 # JP-Extra では ja_bert のみを参照するため、ここだけ float32 に戻せばよい
                 # （prepare_inference_data() 側で既に float32 になっているはずだが、念のため明示的に float32 に戻す）
                 ja_bert = ja_bert.float()
 
-            x, _m_p, _logs_p, x_mask = cast(SynthesizerTrnJPExtra, net_g).enc_p(
-                x_tst,
-                x_tst_lengths,
-                tones,
-                lang_ids,
-                ja_bert,
-                style_vec_tensor,
-                g=g,
-                use_fp16=use_fp16,
-            )
+            if hps.version.endswith("Nanairo"):
+                x, _m_p, _logs_p, x_mask = cast(SynthesizerTrnNanairo, net_g).enc_p(
+                    x_tst,
+                    x_tst_lengths,
+                    tones,
+                    lang_ids,
+                    ja_bert,
+                    style_vec_tensor,
+                    g=g,
+                    use_fp16=use_fp16,
+                )
+            else:
+                x, _m_p, _logs_p, x_mask = cast(SynthesizerTrnJPExtra, net_g).enc_p(
+                    x_tst,
+                    x_tst_lengths,
+                    tones,
+                    lang_ids,
+                    ja_bert,
+                    style_vec_tensor,
+                    g=g,
+                    use_fp16=use_fp16,
+                )
         else:
             if use_fp16 is True:
                 # 通常モデルは多言語対応で、zh/ja/en の各 BERT を参照し得るため、まとめて float32 に正規化する
@@ -709,7 +758,7 @@ def infer(
     sid: int,  # In the original Bert-VITS2, its speaker_name: str, but here it's id
     language: Languages,
     hps: HyperParameters,
-    net_g: SynthesizerTrn | SynthesizerTrnJPExtra,
+    net_g: SynthesizerTrn | SynthesizerTrnJPExtra | SynthesizerTrnNanairo,
     device: str,
     skip_start: bool = False,
     skip_end: bool = False,
@@ -722,11 +771,13 @@ def infer(
     use_fp16: bool = False,
     clear_cuda_cache: bool = True,
     enable_tensor_padding: bool = False,
+    external_speaker_embedding: NDArray[Any] | torch.Tensor | None = None,
+    g_adjust: NDArray[Any] | torch.Tensor | None = None,
 ) -> NDArray[np.float32]:
     """
     PyTorch 版音声合成モデルの推論を実行する関数。
     """
-    is_jp_extra = hps.version.endswith("JP-Extra")
+    is_jp_extra_like_model = hps.is_jp_extra_like_model()
 
     # 推論データの前処理（共通処理）
     with torch.inference_mode():
@@ -774,23 +825,64 @@ def infer(
             )
         )
 
-        if is_jp_extra:
-            output = cast(SynthesizerTrnJPExtra, net_g).infer(
-                x_tst,
-                x_tst_lengths,
-                sid_tensor,
-                tones,
-                lang_ids,
-                ja_bert,
-                style_vec=style_vec_tensor,
-                length_scale=length_scale,
-                sdp_ratio=sdp_ratio,
-                noise_scale=noise_scale,
-                noise_scale_w=noise_scale_w,
-                use_fp16=use_fp16,
-                durations_frames_override=durations_frames_override,
-                durations_frames_override_mask=durations_frames_override_mask,
+        if (
+            is_jp_extra_like_model
+            and not hps.version.endswith("Nanairo")
+            and (external_speaker_embedding is not None or g_adjust is not None)
+        ):
+            raise ValueError(
+                "External speaker embedding or g adjustment is only supported for Nanairo."
             )
+
+        if is_jp_extra_like_model:
+            if isinstance(external_speaker_embedding, np.ndarray):
+                external_speaker_embedding = torch.from_numpy(
+                    external_speaker_embedding
+                )
+            if isinstance(g_adjust, np.ndarray):
+                g_adjust = torch.from_numpy(g_adjust)
+            if isinstance(external_speaker_embedding, torch.Tensor):
+                external_speaker_embedding = external_speaker_embedding.to(
+                    device
+                ).float()
+            if isinstance(g_adjust, torch.Tensor):
+                g_adjust = g_adjust.to(device).float()
+            if hps.version.endswith("Nanairo"):
+                output = cast(SynthesizerTrnNanairo, net_g).infer(
+                    x_tst,
+                    x_tst_lengths,
+                    sid_tensor,
+                    tones,
+                    lang_ids,
+                    ja_bert,
+                    style_vec=style_vec_tensor,
+                    length_scale=length_scale,
+                    sdp_ratio=sdp_ratio,
+                    noise_scale=noise_scale,
+                    noise_scale_w=noise_scale_w,
+                    use_fp16=use_fp16,
+                    durations_frames_override=durations_frames_override,
+                    durations_frames_override_mask=durations_frames_override_mask,
+                    external_spk_emb=external_speaker_embedding,
+                    g_adjust=g_adjust,
+                )
+            else:
+                output = cast(SynthesizerTrnJPExtra, net_g).infer(
+                    x_tst,
+                    x_tst_lengths,
+                    sid_tensor,
+                    tones,
+                    lang_ids,
+                    ja_bert,
+                    style_vec=style_vec_tensor,
+                    length_scale=length_scale,
+                    sdp_ratio=sdp_ratio,
+                    noise_scale=noise_scale,
+                    noise_scale_w=noise_scale_w,
+                    use_fp16=use_fp16,
+                    durations_frames_override=durations_frames_override,
+                    durations_frames_override_mask=durations_frames_override_mask,
+                )
         else:
             output = cast(SynthesizerTrn, net_g).infer(
                 x_tst,
@@ -842,7 +934,7 @@ def infer_stream(
     sid: int,  # In the original Bert-VITS2, its speaker_name: str, but here it's id
     language: Languages,
     hps: HyperParameters,
-    net_g: SynthesizerTrn | SynthesizerTrnJPExtra,
+    net_g: SynthesizerTrn | SynthesizerTrnJPExtra | SynthesizerTrnNanairo,
     device: str,
     skip_start: bool = False,
     skip_end: bool = False,
@@ -872,7 +964,7 @@ def infer_stream(
     assert overlap_size % 2 == 0, (
         "overlap_size must be even for proper margin calculation."
     )
-    is_jp_extra = hps.version.endswith("JP-Extra")
+    is_jp_extra_like_model = hps.is_jp_extra_like_model()
 
     # 推論データの前処理（共通処理）
     with torch.inference_mode():
@@ -921,25 +1013,45 @@ def infer_stream(
         )
 
         # Generator 実行前の共通処理を実行
-        if is_jp_extra:
-            z, y_mask, g, attn, z_p, m_p, logs_p = cast(
-                SynthesizerTrnJPExtra, net_g
-            ).infer_input_feature(
-                x_tst,
-                x_tst_lengths,
-                sid_tensor,
-                tones,
-                lang_ids,
-                ja_bert,
-                style_vec=style_vec_tensor,
-                length_scale=length_scale,
-                sdp_ratio=sdp_ratio,
-                noise_scale=noise_scale,
-                noise_scale_w=noise_scale_w,
-                use_fp16=use_fp16,
-                durations_frames_override=durations_frames_override,
-                durations_frames_override_mask=durations_frames_override_mask,
-            )
+        if is_jp_extra_like_model:
+            if hps.version.endswith("Nanairo"):
+                z, y_mask, g, attn, z_p, m_p, logs_p = cast(
+                    SynthesizerTrnNanairo, net_g
+                ).infer_input_feature(
+                    x_tst,
+                    x_tst_lengths,
+                    sid_tensor,
+                    tones,
+                    lang_ids,
+                    ja_bert,
+                    style_vec=style_vec_tensor,
+                    length_scale=length_scale,
+                    sdp_ratio=sdp_ratio,
+                    noise_scale=noise_scale,
+                    noise_scale_w=noise_scale_w,
+                    use_fp16=use_fp16,
+                    durations_frames_override=durations_frames_override,
+                    durations_frames_override_mask=durations_frames_override_mask,
+                )
+            else:
+                z, y_mask, g, attn, z_p, m_p, logs_p = cast(
+                    SynthesizerTrnJPExtra, net_g
+                ).infer_input_feature(
+                    x_tst,
+                    x_tst_lengths,
+                    sid_tensor,
+                    tones,
+                    lang_ids,
+                    ja_bert,
+                    style_vec=style_vec_tensor,
+                    length_scale=length_scale,
+                    sdp_ratio=sdp_ratio,
+                    noise_scale=noise_scale,
+                    noise_scale_w=noise_scale_w,
+                    use_fp16=use_fp16,
+                    durations_frames_override=durations_frames_override,
+                    durations_frames_override_mask=durations_frames_override_mask,
+                )
         else:
             z, y_mask, g, attn, z_p, m_p, logs_p = cast(
                 SynthesizerTrn, net_g

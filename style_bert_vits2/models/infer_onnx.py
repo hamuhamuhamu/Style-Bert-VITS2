@@ -61,13 +61,13 @@ def get_text_onnx(
 ) -> tuple[
     NDArray[Any], NDArray[Any], NDArray[Any], NDArray[Any], NDArray[Any], NDArray[Any]
 ]:
-    use_jp_extra = hps.version.endswith("JP-Extra")
+    is_jp_extra_like_model = hps.is_jp_extra_like_model()
     norm_text, phone, tone, word2ph, sep_text, _, _ = clean_text_with_given_phone_tone(
         text,
         language_str,
         given_phone=given_phone,
         given_tone=given_tone,
-        use_jp_extra=use_jp_extra,
+        use_jp_extra=is_jp_extra_like_model,
         # 推論時のみ呼び出されるので、raise_yomi_error は False に設定
         raise_yomi_error=False,
         jtalk=jtalk,
@@ -141,7 +141,7 @@ def infer_onnx(
     """
     ONNX 版音声合成モデルの推論を実行する関数。
     """
-    is_jp_extra = hps.version.endswith("JP-Extra")
+    is_jp_extra_like_model = hps.is_jp_extra_like_model()
     # テキストから BERT 特徴量・音素列・アクセント列・言語 ID を取得
     # zh_bert, ja_bert, en_bert のうち、指定された言語に対応する1つのみが実際の特徴量を持ち、残りの2つは空のテンソルになる
     zh_bert, ja_bert, en_bert, phones, tones, lang_ids = get_text_onnx(
@@ -183,7 +183,7 @@ def infer_onnx(
 
     input_names = [input.name for input in onnx_session.get_inputs()]
     output_name = onnx_session.get_outputs()[0].name
-    if is_jp_extra:
+    if is_jp_extra_like_model:
         input_tensor = [
             x_tst,
             x_tst_lengths,

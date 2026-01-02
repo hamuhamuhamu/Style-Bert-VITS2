@@ -36,6 +36,9 @@ if TYPE_CHECKING:
     from style_bert_vits2.models.models_jp_extra import (
         SynthesizerTrn as SynthesizerTrnJPExtra,
     )
+    from style_bert_vits2.models.models_nanairo import (
+        SynthesizerTrn as SynthesizerTrnNanairo,
+    )
 
 
 class NullModelParam(BaseModel):
@@ -135,7 +138,9 @@ class TTSModel:
         self.style_vector_inference: Any | None = None
 
         # net_g / null_model_params は PyTorch 推論時のみ遅延初期化される
-        self.net_g: SynthesizerTrn | SynthesizerTrnJPExtra | None = None
+        self.net_g: (
+            SynthesizerTrn | SynthesizerTrnJPExtra | SynthesizerTrnNanairo | None
+        ) = None
         self.null_model_params: dict[int, NullModelParam] | None = None
 
         # onnx_session は ONNX 推論時のみ遅延初期化される
@@ -406,9 +411,9 @@ class TTSModel:
         """
 
         logger.info(f"Start predicting token durations from text:\n{text}")
-        if language != "JP" and self.hyper_parameters.version.endswith("JP-Extra"):
+        if language != "JP" and self.hyper_parameters.is_jp_extra_like_model():
             raise ValueError(
-                "The model is trained with JP-Extra, but the language is not JP"
+                "The model is trained with JP-Extra or Nanairo, but the language is not JP"
             )
         if reference_audio_path == "":
             reference_audio_path = None
@@ -482,6 +487,8 @@ class TTSModel:
         given_tone: list[int] | None = None,
         pitch_scale: float = 1.0,
         intonation_scale: float = 1.0,
+        external_speaker_embedding: NDArray[Any] | None = None,
+        g_adjust: NDArray[Any] | None = None,
         null_model_params: dict[int, NullModelParam] | None = None,
         force_reload_model: bool = False,
     ) -> tuple[int, NDArray[Any]]:
@@ -509,6 +516,8 @@ class TTSModel:
             given_tone (list[int] | None, optional): アクセントのトーンのリスト. Defaults to None.
             pitch_scale (float, optional): ピッチの高さ (1.0 から変更すると若干音質が低下する). Defaults to 1.0.
             intonation_scale (float, optional): 抑揚の平均からの変化幅 (1.0 から変更すると若干音質が低下する). Defaults to 1.0.
+            external_speaker_embedding (NDArray[Any] | None, optional): 外部 Speaker Embedding 。Defaults to None.
+            g_adjust (NDArray[Any] | None, optional): g 空間の加算ベクトル。Defaults to None.
             null_model_params (dict[int, NullModelParam] | None, optional): 推論時に使用するヌルモデルの情報。ONNX 推論では無視される。
             force_reload_model (bool, optional): モデルを強制的に再ロードするかどうか. Defaults to False.
         Returns:
@@ -516,9 +525,9 @@ class TTSModel:
         """
 
         logger.info(f"Start generating audio data from text:\n{text}")
-        if language != "JP" and self.hyper_parameters.version.endswith("JP-Extra"):
+        if language != "JP" and self.hyper_parameters.is_jp_extra_like_model():
             raise ValueError(
-                "The model is trained with JP-Extra, but the language is not JP"
+                "The model is trained with JP-Extra or Nanairo, but the language is not JP"
             )
         if reference_audio_path == "":
             reference_audio_path = None
@@ -532,6 +541,12 @@ class TTSModel:
         else:
             style_vector = self.get_style_vector_from_audio(
                 reference_audio_path, style_weight
+            )
+        if self.is_onnx_model and (
+            external_speaker_embedding is not None or g_adjust is not None
+        ):
+            raise NotImplementedError(
+                "External speaker embedding and g adjustment are not supported for ONNX inference."
             )
 
         # PyTorch 推論時
@@ -576,6 +591,8 @@ class TTSModel:
                         given_phone_length=given_phone_length,
                         given_tone=given_tone,
                         use_fp16=self.use_fp16,
+                        external_speaker_embedding=external_speaker_embedding,
+                        g_adjust=g_adjust,
                     )
 
             # 改行ごとに分割して音声を生成
@@ -601,6 +618,8 @@ class TTSModel:
                                 assist_text_weight=assist_text_weight,
                                 style_vec=style_vector,
                                 use_fp16=self.use_fp16,
+                                external_speaker_embedding=external_speaker_embedding,
+                                g_adjust=g_adjust,
                             )
                         )
                         if i != len(texts) - 1:

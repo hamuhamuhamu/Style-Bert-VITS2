@@ -34,6 +34,8 @@ class HyperParametersTrain(BaseModel):
     freeze_emo: bool = False
     freeze_style: bool = False
     freeze_decoder: bool = False
+    train_external_speaker_adapter_only: bool = False
+    disable_discriminators_for_adapter: bool = True
 
 
 class HyperParametersData(BaseModel):
@@ -59,6 +61,7 @@ class HyperParametersData(BaseModel):
     style2id: dict[str, int] = {
         "Neutral": 0,
     }
+    use_external_speaker_embedding: bool = False
 
 
 class HyperParametersModelSLM(BaseModel):
@@ -95,6 +98,9 @@ class HyperParametersModel(BaseModel):
     n_layers_q: int = 3
     use_spectral_norm: bool = False
     gin_channels: int = 512
+    use_external_speaker_adapter: bool = False
+    external_speaker_embedding_dim: int = 256
+    external_speaker_adapter_hidden_dim: int = 512
     slm: HyperParametersModelSLM = HyperParametersModelSLM()
 
 
@@ -112,6 +118,21 @@ class HyperParameters(BaseModel):
 
     # model_ 以下を Pydantic の保護対象から除外する
     model_config = ConfigDict(protected_namespaces=())
+
+    def is_jp_extra_like_model(self) -> bool:
+        """
+        JP-Extra 互換モデルかどうかを判定する。
+
+        Returns:
+            bool: JP-Extra 互換モデルかどうか
+        """
+
+        # 基本的にはハイパーパラメータのここで判断できるはず
+        if self.data.use_jp_extra is True:
+            return True
+
+        # フォールバック
+        return self.version.endswith("JP-Extra") or self.version.endswith("Nanairo")
 
     @staticmethod
     def load_from_json(json_path: str | Path) -> "HyperParameters":

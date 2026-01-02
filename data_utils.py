@@ -50,6 +50,10 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
             self.n_mel_channels = getattr(hparams, "n_mel_channels", 80)
 
         self.cleaned_text = getattr(hparams, "cleaned_text", False)
+        self.use_external_speaker_embedding = getattr(
+            hparams, "use_external_speaker_embedding", False
+        )
+        self.speaker_to_audio_paths: dict[str, list[str]] = {}
 
         self.add_blank = hparams.add_blank
         self.min_text_len = getattr(hparams, "min_text_len", 1)
@@ -58,6 +62,8 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         random.seed(1234)
         random.shuffle(self.audiopaths_sid_text)
         self._filter()
+        if self.use_external_speaker_embedding:
+            self._build_speaker_to_audio_paths()
 
     def _filter(self):
         """
@@ -94,9 +100,48 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         self.audiopaths_sid_text = audiopaths_sid_text_new
         self.lengths = lengths
 
+    def _build_speaker_to_audio_paths(self) -> None:
+        """
+        話者ごとの音声パス一覧を構築する。
+        """
+
+        self.speaker_to_audio_paths = {}
+        for (
+            audiopath,
+            spk,
+            _language,
+            _text,
+            _phones,
+            _tone,
+            _word2ph,
+        ) in self.audiopaths_sid_text:
+            self.speaker_to_audio_paths.setdefault(spk, []).append(audiopath)
+
+    def _select_external_embedding_audio_path(self, audiopath: str, spk: str) -> str:
+        """
+        外部 speaker embedding の参照元を選択する。
+
+        Args:
+            audiopath (str): 対象音声のパス
+            spk (str): 話者名
+
+        Returns:
+            str: 参照元の音声パス
+        """
+
+        candidates = self.speaker_to_audio_paths.get(spk, [])
+        if len(candidates) <= 1:
+            return audiopath
+        candidate = audiopath
+        # Avoid selecting the same utterance when possible
+        while candidate == audiopath:
+            candidate = random.choice(candidates)
+        return candidate
+
     def get_audio_text_speaker_pair(self, audiopath_sid_text):
         # separate filename, speaker_id and text
         audiopath, sid, language, text, phones, tone, word2ph = audiopath_sid_text
+        speaker_name = sid
 
         bert, ja_bert, en_bert, phones, tone, language = self.get_text(
             text, word2ph, phones, tone, language, audiopath
@@ -105,9 +150,43 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         spec, wav = self.get_audio(audiopath)
         sid = torch.LongTensor([int(self.spk_map[sid])])
         style_vec = torch.FloatTensor(np.load(f"{audiopath}.npy"))
+        if self.use_external_speaker_embedding:
+            reference_audio_path = self._select_external_embedding_audio_path(
+                audiopath, speaker_name
+            )
+            external_speaker_embedding_path = f"{reference_audio_path}.spk.npy"
+            external_speaker_embedding = torch.FloatTensor(
+                np.load(external_speaker_embedding_path)
+            ).reshape(-1)
         if self.use_jp_extra:
+            if self.use_external_speaker_embedding:
+                return (
+                    phones,
+                    spec,
+                    wav,
+                    sid,
+                    tone,
+                    language,
+                    ja_bert,
+                    style_vec,
+                    external_speaker_embedding,
+                )
             return (phones, spec, wav, sid, tone, language, ja_bert, style_vec)
         else:
+            if self.use_external_speaker_embedding:
+                return (
+                    phones,
+                    spec,
+                    wav,
+                    sid,
+                    tone,
+                    language,
+                    bert,
+                    ja_bert,
+                    en_bert,
+                    style_vec,
+                    external_speaker_embedding,
+                )
             return (
                 phones,
                 spec,
@@ -234,9 +313,15 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
 class TextAudioSpeakerCollate:
     """Zero-pads model inputs and targets"""
 
-    def __init__(self, return_ids=False, use_jp_extra=False):
+    def __init__(
+        self,
+        return_ids: bool = False,
+        use_jp_extra: bool = False,
+        use_external_speaker_embedding: bool = False,
+    ):
         self.return_ids = return_ids
         self.use_jp_extra = use_jp_extra
+        self.use_external_speaker_embedding = use_external_speaker_embedding
 
     def __call__(self, batch):
         """Collate's training batch from normalized text, audio and speaker identities
@@ -267,6 +352,14 @@ class TextAudioSpeakerCollate:
             ja_bert_padded = torch.FloatTensor(len(batch), 1024, max_text_len)
             en_bert_padded = torch.FloatTensor(len(batch), 1024, max_text_len)
         style_vec = torch.FloatTensor(len(batch), 256)
+        if self.use_external_speaker_embedding:
+            if self.use_jp_extra:
+                external_embedding_index = 8
+            else:
+                external_embedding_index = 10
+            external_speaker_embedding = torch.FloatTensor(
+                len(batch), batch[0][external_embedding_index].numel()
+            )
 
         spec_padded = torch.FloatTensor(len(batch), batch[0][1].size(0), max_spec_len)
         wav_padded = torch.FloatTensor(len(batch), 1, max_wav_len)
@@ -280,6 +373,8 @@ class TextAudioSpeakerCollate:
             ja_bert_padded.zero_()
             en_bert_padded.zero_()
         style_vec.zero_()
+        if self.use_external_speaker_embedding:
+            external_speaker_embedding.zero_()
 
         for i in range(len(ids_sorted_decreasing)):
             row = batch[ids_sorted_decreasing[i]]
@@ -309,6 +404,8 @@ class TextAudioSpeakerCollate:
 
             if self.use_jp_extra:
                 style_vec[i, :] = row[7]
+                if self.use_external_speaker_embedding:
+                    external_speaker_embedding[i, :] = row[8].reshape(-1)
             else:
                 ja_bert = row[7]
                 ja_bert_padded[i, :, : ja_bert.size(1)] = ja_bert
@@ -316,8 +413,25 @@ class TextAudioSpeakerCollate:
                 en_bert = row[8]
                 en_bert_padded[i, :, : en_bert.size(1)] = en_bert
                 style_vec[i, :] = row[9]
+                if self.use_external_speaker_embedding:
+                    external_speaker_embedding[i, :] = row[10].reshape(-1)
 
         if self.use_jp_extra:
+            if self.use_external_speaker_embedding:
+                return (
+                    text_padded,
+                    text_lengths,
+                    spec_padded,
+                    spec_lengths,
+                    wav_padded,
+                    wav_lengths,
+                    sid,
+                    tone_padded,
+                    language_padded,
+                    bert_padded,
+                    style_vec,
+                    external_speaker_embedding,
+                )
             return (
                 text_padded,
                 text_lengths,
@@ -332,6 +446,23 @@ class TextAudioSpeakerCollate:
                 style_vec,
             )
         else:
+            if self.use_external_speaker_embedding:
+                return (
+                    text_padded,
+                    text_lengths,
+                    spec_padded,
+                    spec_lengths,
+                    wav_padded,
+                    wav_lengths,
+                    sid,
+                    tone_padded,
+                    language_padded,
+                    bert_padded,
+                    ja_bert_padded,
+                    en_bert_padded,
+                    style_vec,
+                    external_speaker_embedding,
+                )
             return (
                 text_padded,
                 text_lengths,
