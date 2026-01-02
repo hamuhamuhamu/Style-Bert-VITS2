@@ -360,10 +360,7 @@ def simulate_production_usage(
                     memory_before,
                     memory_after,
                 )
-                # 致命的な例外（KeyboardInterrupt、SystemExitなど）は再発生させる
-                if isinstance(ex, (KeyboardInterrupt, SystemExit)):
-                    raise
-                # その他の例外はログに記録して継続（実環境では一部のリクエストが失敗しても継続する）
+                # 例外はログに記録して継続（実環境では一部のリクエストが失敗しても継続する）
                 logger.warning(f"例外を記録して継続します: {type(ex).__name__}: {ex}")
 
         # インターバルを置く（実環境の時間経過を模倣）

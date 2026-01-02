@@ -29,7 +29,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--device", type=str, default="cuda")
 parser.add_argument("--host", type=str, default="0.0.0.0")
 parser.add_argument("--port", type=int, default=None)
-parser.add_argument("--no_autolaunch", action="store_true", default=True)
+parser.add_argument("--autolaunch", action="store_true", default=False)
 parser.add_argument("--share", action="store_true")
 # parser.add_argument("--skip_default_models", action="store_true")
 
@@ -68,6 +68,6 @@ with gr.Blocks(theme=GRADIO_THEME) as app:
 app.launch(
     server_name=args.host,
     server_port=args.port,
-    inbrowser=not args.no_autolaunch,
+    inbrowser=args.autolaunch,
     share=args.share,
 )
