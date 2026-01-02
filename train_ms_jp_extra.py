@@ -30,6 +30,7 @@ import datetime
 import gc
 import os
 import platform
+from contextlib import nullcontext
 from typing import Any
 
 import torch
@@ -411,6 +412,13 @@ def run():
         default=config.dataset_path,
     )
     parser.add_argument(
+        "--pretrained_model_dir",
+        type=str,
+        default=None,
+        help="Directory that contains G_0.safetensors / D_0.safetensors for initialization. "
+        "If omitted, model_dir is used.",
+    )
+    parser.add_argument(
         "--assets_root",
         type=str,
         help="Root directory of model assets needed for inference.",
@@ -464,6 +472,14 @@ def run():
 
     # Set log file
     model_dir = os.path.join(args.model, config.train_ms_config.model_dir)
+    pretrained_model_dir = args.pretrained_model_dir or model_dir
+    if args.pretrained_model_dir is not None and not os.path.isdir(
+        pretrained_model_dir
+    ):
+        logger.warning(
+            f"Pretrained model dir not found: {pretrained_model_dir}. Falling back to model_dir."
+        )
+        pretrained_model_dir = model_dir
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     logger.add(os.path.join(args.model, f"train_{timestamp}.log"))
 
@@ -856,18 +872,19 @@ def run():
     else:
         try:
             _ = utils.safetensors.load_safetensors(
-                os.path.join(model_dir, "G_0.safetensors"), net_g
+                os.path.join(pretrained_model_dir, "G_0.safetensors"), net_g
             )
             _ = utils.safetensors.load_safetensors(
-                os.path.join(model_dir, "D_0.safetensors"), net_d
+                os.path.join(pretrained_model_dir, "D_0.safetensors"), net_d
             )
             if net_dur_disc is not None:
                 _ = utils.safetensors.load_safetensors(
-                    os.path.join(model_dir, "DUR_0.safetensors"), net_dur_disc
+                    os.path.join(pretrained_model_dir, "DUR_0.safetensors"),
+                    net_dur_disc,
                 )
             if net_wd is not None:
                 _ = utils.safetensors.load_safetensors(
-                    os.path.join(model_dir, "WD_0.safetensors"), net_wd
+                    os.path.join(pretrained_model_dir, "WD_0.safetensors"), net_wd
                 )
             logger.info("Loaded the pretrained models.")
         except Exception as e:
@@ -959,6 +976,20 @@ def run():
         )
     else:
         ema_model = None
+
+    if ema_model is not None:
+        try:
+            ema_path = utils.checkpoints.get_latest_checkpoint_path(
+                model_dir, "EMA_*.pth"
+            )
+            ema_state = torch.load(ema_path, map_location="cpu")
+            ema_model.load_state_dict(ema_state.get("state_dict", {}))
+            if "decay" in ema_state:
+                ema_model.decay = float(ema_state["decay"])
+            logger.info(f"[EMA] Loaded state from {ema_path}")
+        except Exception as ex:
+            logger.warning(ex)
+            logger.warning("[EMA] Checkpoint not found. EMA will start fresh.")
 
     # 勾配累積のログ出力
     if args.gradient_accumulation_steps > 1:
@@ -1210,39 +1241,117 @@ def train_and_evaluate(
                 y, ids_slice * hps.data.hop_length, hps.train.segment_size
             )  # slice
 
-            # Discriminator
-            y_d_hat_r, y_d_hat_g, _, _ = net_d(y, y_hat.detach())
+        # 勾配累積を使用する場合は、累積ステップの最初でのみ zero_grad() を呼ぶ
+        is_first_accumulation_step = (batch_idx % gradient_accumulation_steps) == 0
+        is_last_accumulation_step = (
+            (batch_idx + 1) % gradient_accumulation_steps
+        ) == 0
+        should_step = is_last_accumulation_step or not is_accumulating
+
+        # Discriminator
+        y_d_hat_r, y_d_hat_g, _, _ = net_d(y, y_hat.detach())
+        with autocast(
+            device_type="cuda",
+            enabled=hps.train.bf16_run,
+            dtype=torch.bfloat16,
+        ):
+            loss_disc, losses_disc_r, losses_disc_g = discriminator_loss(
+                y_d_hat_r, y_d_hat_g
+            )
+            loss_disc_all = loss_disc
+        if net_dur_disc is not None:
+            y_dur_hat_r, y_dur_hat_g = net_dur_disc(
+                hidden_x.detach(),
+                x_mask.detach(),
+                logw_.detach(),
+                logw.detach(),
+                g.detach(),
+            )
             with autocast(
                 device_type="cuda",
                 enabled=hps.train.bf16_run,
                 dtype=torch.bfloat16,
             ):
-                loss_disc, losses_disc_r, losses_disc_g = discriminator_loss(
-                    y_d_hat_r, y_d_hat_g
-                )
-                loss_disc_all = loss_disc
+                # TODO: I think need to mean using the mask, but for now, just mean all
+                (
+                    loss_dur_disc,
+                    losses_dur_disc_r,
+                    losses_dur_disc_g,
+                ) = discriminator_loss(y_dur_hat_r, y_dur_hat_g)
+                loss_dur_disc_all = loss_dur_disc
+        if net_wd is not None:
+            # logger.debug(f"y.shape: {y.shape}, y_hat.shape: {y_hat.shape}")
+            # shape: (batch, 1, time)
+            with autocast(
+                device_type="cuda",
+                enabled=hps.train.bf16_run,
+                dtype=torch.bfloat16,
+            ):
+                loss_slm = wl.discriminator(
+                    y.detach().squeeze(1), y_hat.detach().squeeze(1)
+                ).mean()
+
+        if is_first_accumulation_step:
+            optim_d.zero_grad()
             if net_dur_disc is not None:
-                y_dur_hat_r, y_dur_hat_g = net_dur_disc(
-                    hidden_x.detach(),
-                    x_mask.detach(),
-                    logw_.detach(),
-                    logw.detach(),
-                    g.detach(),
-                )
-                with autocast(
-                    device_type="cuda",
-                    enabled=hps.train.bf16_run,
-                    dtype=torch.bfloat16,
-                ):
-                    # TODO: I think need to mean using the mask, but for now, just mean all
-                    (
-                        loss_dur_disc,
-                        losses_dur_disc_r,
-                        losses_dur_disc_g,
-                    ) = discriminator_loss(y_dur_hat_r, y_dur_hat_g)
-                    loss_dur_disc_all = loss_dur_disc
                 optim_dur_disc.zero_grad()
-                scaler.scale(loss_dur_disc_all).backward()
+            if net_wd is not None:
+                optim_wd.zero_grad()
+
+        loss_disc_scaled = (
+            loss_disc_all / gradient_accumulation_steps
+            if is_accumulating
+            else loss_disc_all
+        )
+        net_d_no_sync = net_d.no_sync if hasattr(net_d, "no_sync") else nullcontext
+        with (
+            net_d_no_sync()
+            if is_accumulating and not is_last_accumulation_step
+            else nullcontext()
+        ):
+            scaler.scale(loss_disc_scaled).backward()
+
+        if net_dur_disc is not None:
+            loss_dur_disc_scaled = (
+                loss_dur_disc_all / gradient_accumulation_steps
+                if is_accumulating
+                else loss_dur_disc_all
+            )
+            net_dur_no_sync = (
+                net_dur_disc.no_sync if hasattr(net_dur_disc, "no_sync") else nullcontext
+            )
+            with (
+                net_dur_no_sync()
+                if is_accumulating and not is_last_accumulation_step
+                else nullcontext()
+            ):
+                scaler.scale(loss_dur_disc_scaled).backward()
+
+        if net_wd is not None:
+            loss_slm_scaled = (
+                loss_slm / gradient_accumulation_steps if is_accumulating else loss_slm
+            )
+            net_wd_no_sync = net_wd.no_sync if hasattr(net_wd, "no_sync") else nullcontext
+            with (
+                net_wd_no_sync()
+                if is_accumulating and not is_last_accumulation_step
+                else nullcontext()
+            ):
+                scaler.scale(loss_slm_scaled).backward()
+
+        grad_norm_d = 0.0
+        grad_norm_dur = 0.0
+        grad_norm_wd = 0.0
+        if should_step:
+            scaler.unscale_(optim_d)
+            if getattr(hps.train, "bf16_run", False):
+                torch.nn.utils.clip_grad_norm_(
+                    parameters=net_d.parameters(), max_norm=200
+                )
+            grad_norm_d = commons.clip_grad_value_(net_d.parameters(), None)
+            scaler.step(optim_d)
+
+            if net_dur_disc is not None:
                 scaler.unscale_(optim_dur_disc)
                 # torch.nn.utils.clip_grad_norm_(
                 # parameters=net_dur_disc.parameters(), max_norm=5
@@ -1251,32 +1360,11 @@ def train_and_evaluate(
                     net_dur_disc.parameters(), None
                 )
                 scaler.step(optim_dur_disc)
-            if net_wd is not None:
-                # logger.debug(f"y.shape: {y.shape}, y_hat.shape: {y_hat.shape}")
-                # shape: (batch, 1, time)
-                with autocast(
-                    device_type="cuda",
-                    enabled=hps.train.bf16_run,
-                    dtype=torch.bfloat16,
-                ):
-                    loss_slm = wl.discriminator(
-                        y.detach().squeeze(1), y_hat.detach().squeeze(1)
-                    ).mean()
 
-                optim_wd.zero_grad()
-                scaler.scale(loss_slm).backward()
+            if net_wd is not None:
                 scaler.unscale_(optim_wd)
-                # torch.nn.utils.clip_grad_norm_(parameters=net_wd.parameters(), max_norm=200)
                 grad_norm_wd = commons.clip_grad_value_(net_wd.parameters(), None)
                 scaler.step(optim_wd)
-
-        optim_d.zero_grad()
-        scaler.scale(loss_disc_all).backward()
-        scaler.unscale_(optim_d)
-        if getattr(hps.train, "bf16_run", False):
-            torch.nn.utils.clip_grad_norm_(parameters=net_d.parameters(), max_norm=200)
-        grad_norm_d = commons.clip_grad_value_(net_d.parameters(), None)
-        scaler.step(optim_d)
 
         with autocast(
             device_type="cuda",
@@ -1328,9 +1416,6 @@ def train_and_evaluate(
                 if net_wd is not None:
                     loss_gen_all += loss_lm + loss_lm_gen
 
-        # 勾配累積を使用する場合は、累積ステップの最初でのみ zero_grad() を呼ぶ
-        is_first_accumulation_step = (batch_idx % gradient_accumulation_steps) == 0
-        is_last_accumulation_step = ((batch_idx + 1) % gradient_accumulation_steps) == 0
         if is_first_accumulation_step:
             optim_g.zero_grad()
 
@@ -1338,11 +1423,17 @@ def train_and_evaluate(
         if is_accumulating:
             loss_gen_all = loss_gen_all / gradient_accumulation_steps
 
-        scaler.scale(loss_gen_all).backward()
+        net_g_no_sync = net_g.no_sync if hasattr(net_g, "no_sync") else nullcontext
+        with (
+            net_g_no_sync()
+            if is_accumulating and not is_last_accumulation_step
+            else nullcontext()
+        ):
+            scaler.scale(loss_gen_all).backward()
 
         # 累積ステップの最後でのみオプティマイザを更新
         grad_norm_g = 0.0
-        if is_last_accumulation_step or not is_accumulating:
+        if should_step:
             scaler.unscale_(optim_g)
             # 勾配爆発を防ぐため、常に勾配クリッピングを適用
             # if getattr(hps.train, "bf16_run", False):
@@ -1361,7 +1452,11 @@ def train_and_evaluate(
                 gradient_monitor.update(grad_norm_g, optim_g, scheduler_g, global_step)
 
         if rank == 0:
-            if global_step % hps.train.log_interval == 0 and not hps.speedup:
+            if (
+                should_step
+                and global_step % hps.train.log_interval == 0
+                and not hps.speedup
+            ):
                 lr = optim_g.param_groups[0]["lr"]
                 losses = [loss_disc, loss_gen, loss_fm, loss_mel, loss_dur, loss_kl]
                 # logger.info(
@@ -1485,6 +1580,15 @@ def train_and_evaluate(
                         hps.train.learning_rate,
                         epoch,
                         os.path.join(hps.model_dir, f"WD_{global_step}.pth"),
+                    )
+                if ema_model is not None:
+                    ema_state = {
+                        "state_dict": ema_model.state_dict(),
+                        "decay": ema_model.decay,
+                    }
+                    torch.save(
+                        ema_state,
+                        os.path.join(hps.model_dir, f"EMA_{global_step}.pth"),
                     )
                 keep_ckpts = config.train_ms_config.keep_ckpts
                 if keep_ckpts > 0:

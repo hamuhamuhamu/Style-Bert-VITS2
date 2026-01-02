@@ -78,6 +78,13 @@ def run():
         default=config.dataset_path,
     )
     parser.add_argument(
+        "--pretrained_model_dir",
+        type=str,
+        default=None,
+        help="Directory that contains G_0.safetensors / D_0.safetensors for initialization. "
+        "If omitted, model_dir is used.",
+    )
+    parser.add_argument(
         "--assets_root",
         type=str,
         help="Root directory of model assets needed for inference.",
@@ -112,6 +119,14 @@ def run():
 
     # Set log file
     model_dir = os.path.join(args.model, config.train_ms_config.model_dir)
+    pretrained_model_dir = args.pretrained_model_dir or model_dir
+    if args.pretrained_model_dir is not None and not os.path.isdir(
+        pretrained_model_dir
+    ):
+        logger.warning(
+            f"Pretrained model dir not found: {pretrained_model_dir}. Falling back to model_dir."
+        )
+        pretrained_model_dir = model_dir
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     logger.add(os.path.join(args.model, f"train_{timestamp}.log"))
 
@@ -444,14 +459,15 @@ def run():
     else:
         try:
             _ = utils.safetensors.load_safetensors(
-                os.path.join(model_dir, "G_0.safetensors"), net_g
+                os.path.join(pretrained_model_dir, "G_0.safetensors"), net_g
             )
             _ = utils.safetensors.load_safetensors(
-                os.path.join(model_dir, "D_0.safetensors"), net_d
+                os.path.join(pretrained_model_dir, "D_0.safetensors"), net_d
             )
             if net_dur_disc is not None:
                 _ = utils.safetensors.load_safetensors(
-                    os.path.join(model_dir, "DUR_0.safetensors"), net_dur_disc
+                    os.path.join(pretrained_model_dir, "DUR_0.safetensors"),
+                    net_dur_disc,
                 )
             logger.info("Loaded the pretrained models.")
         except Exception as e:
