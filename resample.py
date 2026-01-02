@@ -48,12 +48,10 @@ def resample(
     try:
         # librosaが読めるファイルかチェック
         # wav以外にもmp3やoggやflacなども読める
-        wav: NDArray[Any]
-        sr: int
         wav, sr = librosa.load(file, sr=target_sr)
         if normalize:
             try:
-                wav = normalize_audio(wav, sr)
+                wav = normalize_audio(wav, int(sr))
             except BlockSizeException:
                 print("")
                 logger.info(
@@ -125,8 +123,24 @@ if __name__ == "__main__":
     normalize: bool = args.normalize
     trim: bool = args.trim
 
-    # 後でlibrosaに読ませて有効な音声ファイルかチェックするので、全てのファイルを取得
-    original_files = [f for f in input_dir.rglob("*") if f.is_file()]
+    # librosa / soundfile がサポートする音声ファイルの拡張子でフィルタリング
+    # ref: https://librosa.org/doc/0.11.0/troubleshooting.html
+    ## .DS_Store などの非音声ファイルを除外しないと librosa が audioread にフォールバックして警告が出る
+    supported_extensions = {
+        ".wav",
+        ".flac",
+        ".ogg",
+        ".mp3",
+        ".m4a",
+        ".aac",
+        ".wma",
+        ".opus",
+    }
+    original_files = [
+        f
+        for f in input_dir.rglob("*")
+        if f.is_file() and f.suffix.lower() in supported_extensions
+    ]
 
     if len(original_files) == 0:
         logger.error(f"No files found in {input_dir}")

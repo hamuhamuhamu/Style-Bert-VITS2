@@ -1,10 +1,18 @@
 import argparse
+import warnings
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import numpy as np
 import torch
 from numpy.typing import NDArray
+
+
+# pyannote.audio のインポート前に TF32 警告を抑制
+# TF32 は再現性のために意図的に無効化されており、この警告自体は無害
+# ref: https://github.com/pyannote/pyannote-audio/issues/1370
+warnings.filterwarnings("ignore", message="TensorFloat-32.*")
+
 from pyannote.audio import Inference, Model
 from tqdm import tqdm
 
@@ -17,6 +25,7 @@ from style_bert_vits2.utils.stdout_wrapper import SAFE_STDOUT
 config = get_config()
 
 model = Model.from_pretrained("pyannote/wespeaker-voxceleb-resnet34-LM")
+assert model is not None
 inference = Inference(model, window="whole")
 device = torch.device(config.style_gen_config.device)
 inference.to(device)
