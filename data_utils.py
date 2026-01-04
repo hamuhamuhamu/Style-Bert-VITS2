@@ -1,13 +1,15 @@
 import os
 import random
 import sys
+from pathlib import Path
+from typing import Any
 
 import numpy as np
 import torch
-import torch.utils.data
+from torch.utils.data import Dataset
+from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 
-from config import get_config
 from mel_processing import mel_spectrogram_torch, spectrogram_torch
 from style_bert_vits2.constants import Languages
 from style_bert_vits2.logging import logger
@@ -20,19 +22,24 @@ from style_bert_vits2.nlp import (
 )
 
 
-config = get_config()
 """Multi speaker version"""
 
 
-class TextAudioSpeakerLoader(torch.utils.data.Dataset):
+class TextAudioSpeakerLoader(Dataset[tuple[Any, ...]]):
     """
     1) loads audio, speaker_id, text pairs
     2) normalizes text and converts them to sequences of integers
     3) computes spectrograms from audio files.
     """
 
-    def __init__(self, audiopaths_sid_text: str, hparams: HyperParametersData):
+    def __init__(
+        self,
+        audiopaths_sid_text: str,
+        hparams: HyperParametersData,
+        spec_cache: bool = True,
+    ):
         self.audiopaths_sid_text = load_filepaths_and_text(audiopaths_sid_text)
+        self.spec_cache = spec_cache
         self.max_wav_value = hparams.max_wav_value
         self.sampling_rate = hparams.sampling_rate
         self.filter_length = hparams.filter_length
@@ -132,11 +139,14 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         candidates = self.speaker_to_audio_paths.get(spk, [])
         if len(candidates) <= 1:
             return audiopath
-        candidate = audiopath
+        unique_candidates = list(dict.fromkeys(candidates))
+        candidates_excluding = [
+            candidate for candidate in unique_candidates if candidate != audiopath
+        ]
+        if not candidates_excluding:
+            return audiopath
         # Avoid selecting the same utterance when possible
-        while candidate == audiopath:
-            candidate = random.choice(candidates)
-        return candidate
+        return random.choice(candidates_excluding)
 
     def get_audio_text_speaker_pair(self, audiopath_sid_text):
         # separate filename, speaker_id and text
@@ -150,16 +160,31 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         spec, wav = self.get_audio(audiopath)
         sid = torch.LongTensor([int(self.spk_map[sid])])
         style_vec = torch.FloatTensor(np.load(f"{audiopath}.npy"))
+        external_speaker_embedding: torch.Tensor | None = None
         if self.use_external_speaker_embedding:
             reference_audio_path = self._select_external_embedding_audio_path(
                 audiopath, speaker_name
             )
-            external_speaker_embedding_path = f"{reference_audio_path}.spk.npy"
-            external_speaker_embedding = torch.FloatTensor(
-                np.load(external_speaker_embedding_path)
-            ).reshape(-1)
+            external_speaker_embedding_path = Path(f"{reference_audio_path}.spk.npy")
+            if not external_speaker_embedding_path.exists():
+                raise FileNotFoundError(
+                    "External speaker embedding not found. "
+                    f"speaker: {speaker_name}, audio: {audiopath}, "
+                    f"expected: {external_speaker_embedding_path}"
+                )
+            try:
+                external_speaker_embedding = torch.FloatTensor(
+                    np.load(external_speaker_embedding_path)
+                ).reshape(-1)
+            except Exception as ex:
+                raise RuntimeError(
+                    "Failed to load external speaker embedding. "
+                    f"speaker: {speaker_name}, audio: {audiopath}, "
+                    f"path: {external_speaker_embedding_path}"
+                ) from ex
         if self.use_jp_extra:
             if self.use_external_speaker_embedding:
+                assert external_speaker_embedding is not None
                 return (
                     phones,
                     spec,
@@ -174,6 +199,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
             return (phones, spec, wav, sid, tone, language, ja_bert, style_vec)
         else:
             if self.use_external_speaker_embedding:
+                assert external_speaker_embedding is not None
                 return (
                     phones,
                     spec,
@@ -236,7 +262,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
                     center=False,
                 )
             spec = torch.squeeze(spec, 0)
-            if config.train_ms_config.spec_cache:
+            if self.spec_cache:
                 torch.save(spec, spec_filename)
         return spec, audio_norm
 
@@ -348,10 +374,13 @@ class TextAudioSpeakerCollate:
         language_padded = torch.LongTensor(len(batch), max_text_len)
         # This is ZH bert if not use_jp_extra, JA bert if use_jp_extra
         bert_padded = torch.FloatTensor(len(batch), 1024, max_text_len)
+        ja_bert_padded: torch.Tensor | None = None
+        en_bert_padded: torch.Tensor | None = None
         if not self.use_jp_extra:
             ja_bert_padded = torch.FloatTensor(len(batch), 1024, max_text_len)
             en_bert_padded = torch.FloatTensor(len(batch), 1024, max_text_len)
         style_vec = torch.FloatTensor(len(batch), 256)
+        external_speaker_embedding: torch.Tensor | None = None
         if self.use_external_speaker_embedding:
             if self.use_jp_extra:
                 external_embedding_index = 8
@@ -370,10 +399,13 @@ class TextAudioSpeakerCollate:
         wav_padded.zero_()
         bert_padded.zero_()
         if not self.use_jp_extra:
+            assert ja_bert_padded is not None
+            assert en_bert_padded is not None
             ja_bert_padded.zero_()
             en_bert_padded.zero_()
         style_vec.zero_()
         if self.use_external_speaker_embedding:
+            assert external_speaker_embedding is not None
             external_speaker_embedding.zero_()
 
         for i in range(len(ids_sorted_decreasing)):
@@ -405,19 +437,24 @@ class TextAudioSpeakerCollate:
             if self.use_jp_extra:
                 style_vec[i, :] = row[7]
                 if self.use_external_speaker_embedding:
+                    assert external_speaker_embedding is not None
                     external_speaker_embedding[i, :] = row[8].reshape(-1)
             else:
                 ja_bert = row[7]
+                assert ja_bert_padded is not None
                 ja_bert_padded[i, :, : ja_bert.size(1)] = ja_bert
 
                 en_bert = row[8]
+                assert en_bert_padded is not None
                 en_bert_padded[i, :, : en_bert.size(1)] = en_bert
                 style_vec[i, :] = row[9]
                 if self.use_external_speaker_embedding:
+                    assert external_speaker_embedding is not None
                     external_speaker_embedding[i, :] = row[10].reshape(-1)
 
         if self.use_jp_extra:
             if self.use_external_speaker_embedding:
+                assert external_speaker_embedding is not None
                 return (
                     text_padded,
                     text_lengths,
@@ -447,6 +484,9 @@ class TextAudioSpeakerCollate:
             )
         else:
             if self.use_external_speaker_embedding:
+                assert external_speaker_embedding is not None
+                assert ja_bert_padded is not None
+                assert en_bert_padded is not None
                 return (
                     text_padded,
                     text_lengths,
@@ -463,6 +503,8 @@ class TextAudioSpeakerCollate:
                     style_vec,
                     external_speaker_embedding,
                 )
+            assert ja_bert_padded is not None
+            assert en_bert_padded is not None
             return (
                 text_padded,
                 text_lengths,
@@ -480,7 +522,7 @@ class TextAudioSpeakerCollate:
             )
 
 
-class DistributedBucketSampler(torch.utils.data.distributed.DistributedSampler):
+class DistributedBucketSampler(DistributedSampler[int]):
     """
     Maintain similar input lengths in a batch.
     Length groups are specified by boundaries.
