@@ -3,6 +3,7 @@ import datetime
 import gc
 import os
 import platform
+from pathlib import Path
 
 import torch
 import torch.distributed as dist
@@ -17,7 +18,6 @@ from transformers.trainer_pt_utils import DistributedLengthGroupedSampler
 
 # logging.getLogger("numba").setLevel(logging.WARNING)
 import default_style
-from config import get_config
 from data_utils import (
     DistributedBucketSampler,
     TextAudioSpeakerCollate,
@@ -25,6 +25,9 @@ from data_utils import (
 )
 from losses import discriminator_loss, feature_loss, generator_loss, kl_loss
 from mel_processing import mel_spectrogram_torch, spec_to_mel_torch
+from style_bert_vits2.constants import (
+    DEFAULT_TRAIN_ENV,
+)
 from style_bert_vits2.logging import logger
 from style_bert_vits2.models import commons, utils
 from style_bert_vits2.models.hyper_parameters import HyperParameters
@@ -34,7 +37,13 @@ from style_bert_vits2.models.models import (
     SynthesizerTrn,
 )
 from style_bert_vits2.nlp.symbols import SYMBOLS
+from style_bert_vits2.utils.paths import (
+    TrainingModelPaths,
+    add_model_argument,
+    get_paths_config,
+)
 from style_bert_vits2.utils.stdout_wrapper import SAFE_STDOUT
+from style_bert_vits2.utils.training import TrainRuntimeConfig
 
 
 # PyTorch 最適化設定 (torch >= 2.1 前提)
@@ -54,29 +63,17 @@ torch.backends.cuda.enable_mem_efficient_sdp(True)
 # Math Attention: 上記が使えない場合の最終フォールバック
 torch.backends.cuda.enable_math_sdp(True)
 
-config = get_config()
 global_step = 0
 
 api = HfApi()
 
 
 def run():
-    # Command line configuration is not recommended unless necessary, use config.yml
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "-c",
-        "--config",
-        type=str,
-        default=config.train_ms_config.config_path,
-        help="JSON file for configuration",
+    paths_config = get_paths_config()
+    parser = argparse.ArgumentParser(
+        description="Train multi-language model.",
     )
-    parser.add_argument(
-        "-m",
-        "--model",
-        type=str,
-        help="数据集文件夹路径，请注意，数据不再默认放在/logs文件夹下。如果需要用命令行配置，请声明相对于根目录的路径",
-        default=config.dataset_path,
-    )
+    add_model_argument(parser)
     parser.add_argument(
         "--pretrained_model_dir",
         type=str,
@@ -88,7 +85,13 @@ def run():
         "--assets_root",
         type=str,
         help="Root directory of model assets needed for inference.",
-        default=config.assets_root,
+        default=str(paths_config.assets_root),
+    )
+    parser.add_argument(
+        "--keep_ckpts",
+        type=int,
+        default=1,
+        help="Number of checkpoints to keep. Set to 0 to keep all. Default: 1",
     )
     parser.add_argument(
         "--skip_default_style",
@@ -117,8 +120,13 @@ def run():
     )
     args = parser.parse_args()
 
-    # Set log file
-    model_dir = os.path.join(args.model, config.train_ms_config.model_dir)
+    # TrainingModelPaths を使ってパスを解決
+    model_folder_name: str = args.model
+    paths = TrainingModelPaths(model_folder_name=model_folder_name)
+    assets_root = Path(args.assets_root)
+
+    # チェックポイント保存ディレクトリ (Data/{model_folder_name}/models/)
+    model_dir = str(paths.models_dir)
     pretrained_model_dir = args.pretrained_model_dir or model_dir
     if args.pretrained_model_dir is not None and not os.path.isdir(
         pretrained_model_dir
@@ -128,13 +136,13 @@ def run():
         )
         pretrained_model_dir = model_dir
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    logger.add(os.path.join(args.model, f"train_{timestamp}.log"))
+    logger.add(str(paths.dataset_dir / f"train_{timestamp}.log"))
 
-    # Parsing environment variables
-    envs = config.train_ms_config.env
-    for env_name, env_value in envs.items():
+    # 分散学習用の環境変数をセット
+    # 未設定の変数のみ DEFAULT_TRAIN_ENV から設定される
+    for env_name, env_value in DEFAULT_TRAIN_ENV.items():
         if env_name not in os.environ.keys():
-            logger.info(f"Loading configuration from config {env_value!s}")
+            logger.info(f"Setting default environment variable: {env_name}={env_value}")
             os.environ[env_name] = str(env_value)
     logger.info(
         "Loading environment variables \nMASTER_ADDR: {},\nMASTER_PORT: {},\nWORLD_SIZE: {},\nRANK: {},\nLOCAL_RANK: {}".format(
@@ -158,72 +166,62 @@ def run():
     local_rank = int(os.environ["LOCAL_RANK"])
     n_gpus = dist.get_world_size()
 
-    hps = HyperParameters.load_from_json(args.config)
-    # This is needed because we have to pass values to `train_and_evaluate()`
-    hps.model_dir = model_dir
-    hps.speedup = args.speedup
-    hps.repo_id = args.repo_id
-
-    # 比较路径是否相同
-    if os.path.realpath(args.config) != os.path.realpath(
-        config.train_ms_config.config_path
-    ):
-        with open(args.config, encoding="utf-8") as f:
-            data = f.read()
-        os.makedirs(os.path.dirname(config.train_ms_config.config_path), exist_ok=True)
-        with open(config.train_ms_config.config_path, "w", encoding="utf-8") as f:
-            f.write(data)
+    hps = HyperParameters.load_from_json(paths.config_path)
+    runtime_config = TrainRuntimeConfig(
+        model_name=hps.model_name,
+        model_dir=model_dir,
+        out_dir=str(assets_root / model_folder_name),
+        dataset_path=str(paths.dataset_dir),
+        keep_ckpts=args.keep_ckpts,
+        repo_id=args.repo_id,
+        speedup=args.speedup,
+        spec_cache=True,
+    )
 
     """
-    Path constants are a bit complicated...
-    TODO: Refactor or rename these?
-    (Both `config.yml` and `config.json` are used, which is confusing I think.)
-
-    args.model: For saving all info needed for training.
-        default: `Data/{model_name}`.
-    hps.model_dir := model_dir: For saving checkpoints (for resuming training).
-        default: `Data/{model_name}/models`.
-        (Use `hps` since we have to pass `model_dir` to `train_and_evaluate()`.
-
-    args.assets_root: The root directory of model assets needed for inference.
-        default: config.assets_root == `model_assets`.
-
-    config.out_dir: The directory for model assets of this model (for inference).
-        default: `model_assets/{model_name}`.
+    パス定数について:
+    - args.model: 学習データのフォルダ名 (Data/ 以下)
+    - runtime_config.model_name: config.json の model_name フィールド（ファイル名に使用）
+    - runtime_config.model_dir: チェックポイント保存先 (Data/{model}/models/)
+    - runtime_config.out_dir: 推論用モデルの出力先 (model_assets/{model}/)
+    - runtime_config.dataset_path: データセットパス (Data/{model}/)
     """
 
     if args.repo_id is not None:
         # First try to upload config.json to check if the repo exists
+        assert runtime_config.dataset_path is not None
         try:
             api.upload_file(
-                path_or_fileobj=args.config,
-                path_in_repo=f"Data/{config.model_name}/config.json",
-                repo_id=hps.repo_id,
+                path_or_fileobj=str(paths.config_path),
+                path_in_repo=f"Data/{runtime_config.model_name}/config.json",
+                repo_id=args.repo_id,
             )
-        except Exception as e:
-            logger.error(e)
+        except Exception as ex:
             logger.error(
-                f"Failed to upload files to the repo {hps.repo_id}. Please check if the repo exists and you have logged in using `huggingface-cli login`."
+                f"Failed to upload files to the repo {args.repo_id}. "
+                "Please check if the repo exists and you have logged in using `huggingface-cli login`.",
+                exc_info=ex,
             )
-            raise e
+            raise ex
         # Upload Data dir for resuming training
         api.upload_folder(
-            repo_id=hps.repo_id,
-            folder_path=config.dataset_path,
-            path_in_repo=f"Data/{config.model_name}",
+            repo_id=args.repo_id,
+            folder_path=runtime_config.dataset_path,
+            path_in_repo=f"Data/{runtime_config.model_name}",
             delete_patterns="*.pth",  # Only keep the latest checkpoint
-            ignore_patterns=f"{config.dataset_path}/raw",  # Ignore raw data
+            ignore_patterns="raw/**",  # Ignore raw data
             run_as_future=True,
         )
 
-    os.makedirs(config.out_dir, exist_ok=True)
+    assert runtime_config.out_dir is not None
+    os.makedirs(runtime_config.out_dir, exist_ok=True)
 
     if not args.skip_default_style:
         default_style.save_styles_by_dirs(
-            os.path.join(args.model, "wavs"),
-            config.out_dir,
-            config_path=args.config,
-            config_output_path=os.path.join(config.out_dir, "config.json"),
+            str(paths.wavs_dir),
+            runtime_config.out_dir,
+            config_path=str(paths.config_path),
+            config_output_path=os.path.join(runtime_config.out_dir, "config.json"),
         )
 
     torch.manual_seed(hps.train.seed)
@@ -233,12 +231,14 @@ def run():
     writer = None
     writer_eval = None
     if rank == 0 and not args.speedup:
-        # logger = utils.get_logger(hps.model_dir)
+        # logger = utils.get_logger(runtime_config.model_dir)
         # logger.info(hps)
         utils.check_git_hash(model_dir)
         writer = SummaryWriter(log_dir=model_dir)
         writer_eval = SummaryWriter(log_dir=os.path.join(model_dir, "eval"))
-    train_dataset = TextAudioSpeakerLoader(hps.data.training_files, hps.data)
+    train_dataset = TextAudioSpeakerLoader(
+        hps.data.training_files, hps.data, spec_cache=runtime_config.spec_cache
+    )
     collate_fn = TextAudioSpeakerCollate()
     if not args.not_use_custom_batch_sampler:
         train_sampler = DistributedBucketSampler(
@@ -293,7 +293,9 @@ def run():
     eval_dataset = None
     eval_loader = None
     if rank == 0 and not args.speedup:
-        eval_dataset = TextAudioSpeakerLoader(hps.data.validation_files, hps.data)
+        eval_dataset = TextAudioSpeakerLoader(
+            hps.data.validation_files, hps.data, spec_cache=runtime_config.spec_cache
+        )
         eval_loader = DataLoader(
             eval_dataset,
             num_workers=0,
@@ -410,7 +412,6 @@ def run():
         optim_dur_disc = None
     net_g = DDP(net_g, device_ids=[local_rank])
     net_d = DDP(net_d, device_ids=[local_rank])
-    dur_resume_lr = None
     if net_dur_disc is not None:
         # NOTE: gin_channels != 0 (マルチスピーカー) 時、self.cond 層が作成されるが
         # forward 時に g を渡していないため未使用パラメータとなる
@@ -421,41 +422,60 @@ def run():
 
     if utils.is_resuming(model_dir):
         if net_dur_disc is not None:
-            _, _, dur_resume_lr, epoch_str = utils.checkpoints.load_checkpoint(
-                utils.checkpoints.get_latest_checkpoint_path(model_dir, "DUR_*.pth"),
-                net_dur_disc,
-                optim_dur_disc,
+            # チェックポイントが見つからない場合のデフォルト学習率
+            dur_resume_lr = hps.train.learning_rate
+            try:
+                _, _, dur_resume_lr, epoch_str = utils.checkpoints.load_checkpoint(
+                    utils.checkpoints.get_latest_checkpoint_path(
+                        model_dir, "DUR_*.pth"
+                    ),
+                    net_dur_disc,
+                    optim_dur_disc,
+                    skip_optimizer=hps.train.skip_optimizer,
+                )
+                if not optim_dur_disc.param_groups[0].get("initial_lr"):
+                    optim_dur_disc.param_groups[0]["initial_lr"] = dur_resume_lr
+            except Exception as ex:
+                # チェックポイントのロードに失敗した場合、デフォルト学習率で初期化
+                logger.warning(f"Failed to load DUR checkpoint: {ex}")
+                if not optim_dur_disc.param_groups[0].get("initial_lr"):
+                    optim_dur_disc.param_groups[0]["initial_lr"] = dur_resume_lr
+                logger.info("Initialize dur_disc with default learning rate")
+        try:
+            _, optim_g, g_resume_lr, epoch_str = utils.checkpoints.load_checkpoint(
+                utils.checkpoints.get_latest_checkpoint_path(model_dir, "G_*.pth"),
+                net_g,
+                optim_g,
                 skip_optimizer=hps.train.skip_optimizer,
             )
-            if not optim_dur_disc.param_groups[0].get("initial_lr"):
-                optim_dur_disc.param_groups[0]["initial_lr"] = dur_resume_lr
-        _, optim_g, g_resume_lr, epoch_str = utils.checkpoints.load_checkpoint(
-            utils.checkpoints.get_latest_checkpoint_path(model_dir, "G_*.pth"),
-            net_g,
-            optim_g,
-            skip_optimizer=hps.train.skip_optimizer,
-        )
-        _, optim_d, d_resume_lr, epoch_str = utils.checkpoints.load_checkpoint(
-            utils.checkpoints.get_latest_checkpoint_path(model_dir, "D_*.pth"),
-            net_d,
-            optim_d,
-            skip_optimizer=hps.train.skip_optimizer,
-        )
-        if not optim_g.param_groups[0].get("initial_lr"):
-            optim_g.param_groups[0]["initial_lr"] = g_resume_lr
-        if not optim_d.param_groups[0].get("initial_lr"):
-            optim_d.param_groups[0]["initial_lr"] = d_resume_lr
-
-        epoch_str = max(epoch_str, 1)
-        # global_step = (epoch_str - 1) * len(train_loader)
-        global_step = int(
-            utils.get_steps(
-                utils.checkpoints.get_latest_checkpoint_path(model_dir, "G_*.pth")
+            _, optim_d, d_resume_lr, epoch_str = utils.checkpoints.load_checkpoint(
+                utils.checkpoints.get_latest_checkpoint_path(model_dir, "D_*.pth"),
+                net_d,
+                optim_d,
+                skip_optimizer=hps.train.skip_optimizer,
             )
-        )
-        logger.info(
-            f"******************Found the model. Current epoch is {epoch_str}, gloabl step is {global_step}*********************"
-        )
+            if not optim_g.param_groups[0].get("initial_lr"):
+                optim_g.param_groups[0]["initial_lr"] = g_resume_lr
+            if not optim_d.param_groups[0].get("initial_lr"):
+                optim_d.param_groups[0]["initial_lr"] = d_resume_lr
+
+            epoch_str = max(epoch_str, 1)
+            # global_step = (epoch_str - 1) * len(train_loader)
+            global_step = int(
+                utils.get_steps(
+                    utils.checkpoints.get_latest_checkpoint_path(model_dir, "G_*.pth")
+                )
+            )
+            logger.info(
+                f"******************Found the model. Current epoch is {epoch_str}, global step is {global_step}*********************"
+            )
+        except Exception as e:
+            logger.warning(e)
+            logger.warning(
+                "It seems that you are not using the pretrained models, so we will train from scratch."
+            )
+            epoch_str = 1
+            global_step = 0
     else:
         try:
             _ = utils.safetensors.load_safetensors(
@@ -530,6 +550,7 @@ def run():
                 local_rank,
                 epoch,
                 hps,
+                runtime_config,
                 [net_g, net_d, net_dur_disc],
                 [optim_g, optim_d, optim_dur_disc],
                 [scheduler_g, scheduler_d, scheduler_dur_disc],
@@ -546,6 +567,7 @@ def run():
                 local_rank,
                 epoch,
                 hps,
+                runtime_config,
                 [net_g, net_d, net_dur_disc],
                 [optim_g, optim_d, optim_dur_disc],
                 [scheduler_g, scheduler_d, scheduler_dur_disc],
@@ -592,31 +614,31 @@ def run():
                 net_g,
                 epoch,
                 os.path.join(
-                    config.out_dir,
-                    f"{config.model_name}_e{epoch}_s{global_step}.safetensors",
+                    runtime_config.out_dir,
+                    f"{runtime_config.model_name}_e{epoch}_s{global_step}.safetensors",
                 ),
                 for_infer=True,
             )
-            if hps.repo_id is not None:
+            if runtime_config.repo_id is not None:
                 future1 = api.upload_folder(
-                    repo_id=hps.repo_id,
-                    folder_path=config.dataset_path,
-                    path_in_repo=f"Data/{config.model_name}",
+                    repo_id=runtime_config.repo_id,
+                    folder_path=runtime_config.dataset_path,
+                    path_in_repo=f"Data/{runtime_config.model_name}",
                     delete_patterns="*.pth",  # Only keep the latest checkpoint
-                    ignore_patterns=f"{config.dataset_path}/raw",  # Ignore raw data
+                    ignore_patterns="raw/**",  # Ignore raw data
                     run_as_future=True,
                 )
                 future2 = api.upload_folder(
-                    repo_id=hps.repo_id,
-                    folder_path=config.out_dir,
-                    path_in_repo=f"model_assets/{config.model_name}",
+                    repo_id=runtime_config.repo_id,
+                    folder_path=runtime_config.out_dir,
+                    path_in_repo=f"model_assets/{runtime_config.model_name}",
                     run_as_future=True,
                 )
                 try:
                     future1.result()
                     future2.result()
-                except Exception as e:
-                    logger.error(e)
+                except Exception as ex:
+                    logger.error("Failed to upload to HuggingFace", exc_info=ex)
 
     if pbar is not None:
         pbar.close()
@@ -627,6 +649,7 @@ def train_and_evaluate(
     local_rank,
     epoch,
     hps: HyperParameters,
+    runtime_config: TrainRuntimeConfig,
     nets,
     optims,
     schedulers,
@@ -644,8 +667,8 @@ def train_and_evaluate(
     if writers is not None:
         writer, writer_eval = writers
 
-    # DistributedBucketSampler でエポックごとに異なるシャッフルを行う
-    train_loader.batch_sampler.set_epoch(epoch)
+    # マルチ GPU 学習は基本行わないため、DistributedBucketSampler でのシャッフルを固定して再現性を優先する
+    # train_loader.batch_sampler.set_epoch(epoch)
     global global_step
 
     net_g.train()
@@ -825,7 +848,7 @@ def train_and_evaluate(
         scaler.update()
 
         if rank == 0:
-            if global_step % hps.train.log_interval == 0 and not hps.speedup:
+            if global_step % hps.train.log_interval == 0 and not runtime_config.speedup:
                 lr = optim_g.param_groups[0]["lr"]
                 losses = [loss_disc, loss_gen, loss_fm, loss_mel, loss_dur, loss_kl]
                 # logger.info(
@@ -884,22 +907,22 @@ def train_and_evaluate(
                 and global_step != 0
                 and initial_step != global_step
             ):
-                if not hps.speedup:
+                if not runtime_config.speedup:
                     evaluate(hps, net_g, eval_loader, writer_eval)
-                assert hps.model_dir is not None
+                assert runtime_config.model_dir is not None
                 utils.checkpoints.save_checkpoint(
                     net_g,
                     optim_g,
                     hps.train.learning_rate,
                     epoch,
-                    os.path.join(hps.model_dir, f"G_{global_step}.pth"),
+                    os.path.join(runtime_config.model_dir, f"G_{global_step}.pth"),
                 )
                 utils.checkpoints.save_checkpoint(
                     net_d,
                     optim_d,
                     hps.train.learning_rate,
                     epoch,
-                    os.path.join(hps.model_dir, f"D_{global_step}.pth"),
+                    os.path.join(runtime_config.model_dir, f"D_{global_step}.pth"),
                 )
                 if net_dur_disc is not None:
                     utils.checkpoints.save_checkpoint(
@@ -907,13 +930,14 @@ def train_and_evaluate(
                         optim_dur_disc,
                         hps.train.learning_rate,
                         epoch,
-                        os.path.join(hps.model_dir, f"DUR_{global_step}.pth"),
+                        os.path.join(
+                            runtime_config.model_dir, f"DUR_{global_step}.pth"
+                        ),
                     )
-                keep_ckpts = config.train_ms_config.keep_ckpts
-                if keep_ckpts > 0:
+                if runtime_config.keep_ckpts > 0:
                     utils.checkpoints.clean_checkpoints(
-                        model_dir_path=hps.model_dir,
-                        n_ckpts_to_keep=keep_ckpts,
+                        model_dir_path=runtime_config.model_dir,
+                        n_ckpts_to_keep=runtime_config.keep_ckpts,
                         sort_by_time=True,
                     )
                 # Save safetensors (for inference) to `model_assets/{model_name}`
@@ -921,24 +945,24 @@ def train_and_evaluate(
                     net_g,
                     epoch,
                     os.path.join(
-                        config.out_dir,
-                        f"{config.model_name}_e{epoch}_s{global_step}.safetensors",
+                        runtime_config.out_dir,
+                        f"{runtime_config.model_name}_e{epoch}_s{global_step}.safetensors",
                     ),
                     for_infer=True,
                 )
-                if hps.repo_id is not None:
+                if runtime_config.repo_id is not None:
                     api.upload_folder(
-                        repo_id=hps.repo_id,
-                        folder_path=config.dataset_path,
-                        path_in_repo=f"Data/{config.model_name}",
+                        repo_id=runtime_config.repo_id,
+                        folder_path=runtime_config.dataset_path,
+                        path_in_repo=f"Data/{runtime_config.model_name}",
                         delete_patterns="*.pth",  # Only keep the latest checkpoint
-                        ignore_patterns=f"{config.dataset_path}/raw",  # Ignore raw data
+                        ignore_patterns="raw/**",  # Ignore raw data
                         run_as_future=True,
                     )
                     api.upload_folder(
-                        repo_id=hps.repo_id,
-                        folder_path=config.out_dir,
-                        path_in_repo=f"model_assets/{config.model_name}",
+                        repo_id=runtime_config.repo_id,
+                        folder_path=runtime_config.out_dir,
+                        path_in_repo=f"model_assets/{runtime_config.model_name}",
                         run_as_future=True,
                     )
 

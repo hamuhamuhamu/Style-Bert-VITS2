@@ -25,13 +25,12 @@ Generator の学習結果は従来と完全に等価である（どちらも Wav
 """
 
 import argparse
-import copy
 import datetime
 import gc
 import os
 import platform
 from contextlib import nullcontext
-from typing import Any
+from pathlib import Path
 
 import torch
 import torch.distributed as dist
@@ -46,7 +45,6 @@ from transformers.trainer_pt_utils import DistributedLengthGroupedSampler
 
 # logging.getLogger("numba").setLevel(logging.WARNING)
 import default_style
-from config import get_config
 from data_utils import (
     DistributedBucketSampler,
     TextAudioSpeakerCollate,
@@ -54,6 +52,9 @@ from data_utils import (
 )
 from losses import WavLMLoss, discriminator_loss, feature_loss, generator_loss, kl_loss
 from mel_processing import mel_spectrogram_torch, spec_to_mel_torch
+from style_bert_vits2.constants import (
+    DEFAULT_TRAIN_ENV,
+)
 from style_bert_vits2.logging import logger
 from style_bert_vits2.models import commons, utils
 from style_bert_vits2.models.hyper_parameters import HyperParameters
@@ -64,7 +65,17 @@ from style_bert_vits2.models.models_jp_extra import (
     WavLMDiscriminator,
 )
 from style_bert_vits2.nlp.symbols import SYMBOLS
+from style_bert_vits2.utils.paths import (
+    TrainingModelPaths,
+    add_model_argument,
+    get_paths_config,
+)
 from style_bert_vits2.utils.stdout_wrapper import SAFE_STDOUT
+from style_bert_vits2.utils.training import (
+    EMAModel,
+    GradientMonitor,
+    TrainRuntimeConfig,
+)
 
 
 # PyTorch 最適化設定 (torch >= 2.1 前提)
@@ -84,308 +95,9 @@ torch.backends.cuda.enable_mem_efficient_sdp(True)
 # Math Attention: 上記が使えない場合の最終フォールバック
 torch.backends.cuda.enable_math_sdp(True)
 
-config = get_config()
 global_step = 0
 
 api = HfApi()
-
-
-class GradientMonitor:
-    """
-    勾配ノルムを監視し、異常検出時に学習率を自動調整するクラス。
-
-    Generator の勾配ノルム (grad_norm_g) の指数移動平均 (EMA) を追跡し、
-    以下の条件で学習率を自動的に減少させる。
-    1. スパイク検出: 現在の grad_norm_g が EMA を大幅に上回った場合
-    2. 持続的高勾配検出: 高い勾配ノルムが複数ステップ連続した場合
-
-    機械学習の専門知識がないユーザーでも、勾配関連の問題に対して
-    手動介入なしで安定した学習を行えるようにすることが目的。
-
-    Args:
-        ema_alpha: EMA 計算の平滑化係数 (0 < alpha <= 1)。
-            値が大きいほど直近の観測値を重視する。
-        spike_threshold: スパイク検出の倍率。
-            現在の grad_norm > spike_threshold * EMA の場合にスパイクと判定。
-        high_grad_threshold: 「高勾配」と判定する絶対閾値。
-            この値を超える勾配は持続的高勾配検出の対象となる。
-        sustained_high_steps: 学習率減少をトリガーするまでの連続高勾配ステップ数。
-        lr_decay_factor: 調整時に学習率に乗じる係数。
-        min_lr: 過度な減少を防ぐための最小学習率。
-        cooldown_steps: 連続した学習率調整間の最小ステップ数。
-    """
-
-    def __init__(
-        self,
-        ema_alpha: float = 0.1,  # EMA 平滑化係数
-        spike_threshold: float = 5.0,  # スパイク検出: 現在値 > 5倍 EMA でトリガー
-        high_grad_threshold: float = 100.0,  # 「高勾配」と判定する閾値
-        sustained_high_steps: int = 50,  # 調整トリガーまでの連続高勾配ステップ数
-        lr_decay_factor: float = 0.5,  # トリガー時に学習率を 50% に減少
-        min_lr: float = 1e-6,  # 最小学習率
-        cooldown_steps: int = 1000,  # 連続調整間のステップ数
-    ):
-        self.ema_alpha = ema_alpha
-        self.spike_threshold = spike_threshold
-        self.high_grad_threshold = high_grad_threshold
-        self.sustained_high_steps = sustained_high_steps
-        self.lr_decay_factor = lr_decay_factor
-        self.min_lr = min_lr
-        self.cooldown_steps = cooldown_steps
-
-        # 内部状態
-        self.ema: float | None = None
-        self.high_count: int = 0
-        self.steps_since_adjustment: int = 0
-        self.total_steps: int = 0
-        self.adjustment_history: list[tuple[int, float, float, str]] = []
-        self.is_enabled: bool = True
-
-    def update(
-        self,
-        grad_norm_g: float,
-        optim_g: torch.optim.Optimizer,
-        scheduler_g: torch.optim.lr_scheduler.LRScheduler,
-        global_step: int,
-    ) -> bool:
-        """
-        新しい勾配ノルムの観測値でモニターを更新し、必要に応じて学習率を調整する。
-
-        Args:
-            grad_norm_g: 現在の Generator 勾配ノルム値。
-            optim_g: 学習率を調整する対象の Generator オプティマイザ。
-            scheduler_g: Generator の学習率スケジューラ。
-                調整時に base_lrs も更新することでエポック境界での上書きを防ぐ。
-            global_step: ログ出力用の現在のグローバル学習ステップ。
-
-        Returns:
-            学習率が調整された場合は True、そうでなければ False。
-        """
-
-        if not self.is_enabled:
-            return False
-
-        self.total_steps += 1
-        self.steps_since_adjustment += 1
-
-        # grad_norm が無効値 (NaN または Inf) の場合はスキップ
-        if not torch.isfinite(torch.tensor(grad_norm_g)):
-            logger.warning(
-                f"[GradientMonitor] Invalid grad_norm_g detected at step {global_step}: {grad_norm_g}. "
-                f"Skipping update. Training may be unstable."
-            )
-            return False
-
-        # 初回ステップで EMA を初期化
-        if self.ema is None:
-            self.ema = grad_norm_g
-            return False
-
-        # EMA を更新
-        old_ema = self.ema
-        self.ema = self.ema_alpha * grad_norm_g + (1 - self.ema_alpha) * self.ema
-
-        # クールダウン期間中かどうかを確認
-        is_in_cooldown = self.steps_since_adjustment < self.cooldown_steps
-
-        # スパイク検出: 現在の grad_norm が EMA を大幅に上回っているか
-        is_spike = grad_norm_g > self.spike_threshold * old_ema and old_ema > 0
-
-        # 持続的高勾配検出のための追跡
-        if grad_norm_g > self.high_grad_threshold:
-            self.high_count += 1
-        else:
-            # 勾配が正常に戻ったらカウンターをリセット
-            self.high_count = 0
-
-        is_sustained_high = self.high_count >= self.sustained_high_steps
-
-        # 学習率調整が必要かどうかを判定
-        is_adjustment_needed = False
-        adjustment_reason = ""
-
-        if is_spike and not is_in_cooldown:
-            is_adjustment_needed = True
-            adjustment_reason = (
-                f"Spike detected: grad_norm_g: {grad_norm_g:.2f} is {grad_norm_g / old_ema:.1f}x "
-                f"higher than EMA: {old_ema:.2f}"
-            )
-        elif is_sustained_high and not is_in_cooldown:
-            is_adjustment_needed = True
-            adjustment_reason = (
-                f"Sustained high gradients: grad_norm_g > {self.high_grad_threshold} "
-                f"for {self.high_count} consecutive steps"
-            )
-
-        # 学習率調整を適用
-        if is_adjustment_needed:
-            current_lr = optim_g.param_groups[0]["lr"]
-            new_lr = max(current_lr * self.lr_decay_factor, self.min_lr)
-
-            if new_lr >= current_lr:
-                # 学習率が既に最小値なので調整不可
-                logger.warning(
-                    f"[GradientMonitor] Step {global_step}: {adjustment_reason}, "
-                    f"but learning rate is already at minimum ({current_lr:.2e}). "
-                    f"Consider stopping training or adjusting hyperparameters."
-                )
-                return False
-
-            # 新しい学習率を適用
-            for param_group in optim_g.param_groups:
-                param_group["lr"] = new_lr
-
-            # スケジューラの base_lrs も同じ比率で減少させる
-            # これによりエポック境界での scheduler.step() による上書きを防ぐ
-            for i in range(len(scheduler_g.base_lrs)):
-                scheduler_g.base_lrs[i] *= self.lr_decay_factor
-
-            # 調整履歴を記録
-            self.adjustment_history.append(
-                (global_step, current_lr, new_lr, adjustment_reason)
-            )
-            self.steps_since_adjustment = 0
-            self.high_count = 0
-
-            logger.warning(
-                f"[GradientMonitor] Step {global_step}: Learning rate automatically reduced. "
-                f"{adjustment_reason}. "
-                f"LR: {current_lr:.2e} -> {new_lr:.2e}"
-            )
-
-            return True
-
-        return False
-
-    def state_dict(self) -> dict[str, Any]:
-        """
-        チェックポイント保存用に現在の状態を取得する。
-
-        Returns:
-            モニターを復元するために必要な全ての状態変数を含む辞書。
-        """
-
-        return {
-            "ema": self.ema,
-            "high_count": self.high_count,
-            "steps_since_adjustment": self.steps_since_adjustment,
-            "total_steps": self.total_steps,
-            "adjustment_history": self.adjustment_history,
-            "is_enabled": self.is_enabled,
-        }
-
-    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
-        """
-        チェックポイントから状態を復元する。
-
-        Args:
-            state_dict: 以前のチェックポイントからの状態変数を含む辞書。
-        """
-
-        self.ema = state_dict.get("ema", None)
-        self.high_count = state_dict.get("high_count", 0)
-        self.steps_since_adjustment = state_dict.get("steps_since_adjustment", 0)
-        self.total_steps = state_dict.get("total_steps", 0)
-        self.adjustment_history = state_dict.get("adjustment_history", [])
-        self.is_enabled = state_dict.get("is_enabled", True)
-
-
-class EMAModel:
-    """
-    モデル重みの指数移動平均 (Exponential Moving Average) を管理するクラス。
-
-    学習中のモデル重みは勾配更新により振動するが、EMA はその平滑化されたバージョンを保持する。
-    推論時に EMA 重みを使用することで、より安定した出力が得られる傾向がある。
-
-    使い方:
-        1. 学習開始時に EMAModel を初期化
-        2. 各オプティマイザステップ後に update() を呼び出し
-        3. チェックポイント保存時に get_ema_model() で EMA モデルを取得して保存
-
-    Args:
-        model: EMA を適用する対象モデル (通常は Generator)
-        decay: EMA の減衰率 (0.999 が一般的)。
-            値が大きいほど過去の重みを重視し、より滑らかになる。
-        device: EMA モデルを配置するデバイス
-    """
-
-    def __init__(
-        self,
-        model: torch.nn.Module,
-        decay: float = 0.999,  # 減衰率: 0.999 が一般的な値
-        device: torch.device | None = None,
-    ):
-        self.decay = decay
-        self.device = device
-
-        # モデルの深いコピーを作成して EMA 用の重みを保持
-        # DDP の場合は .module を使用して内部モデルを取得
-        if hasattr(model, "module"):
-            self.ema_model = copy.deepcopy(model.module)
-        else:
-            self.ema_model = copy.deepcopy(model)
-
-        # EMA モデルは学習しないので勾配計算を無効化
-        self.ema_model.eval()
-        for param in self.ema_model.parameters():
-            param.requires_grad_(False)
-
-        if device is not None:
-            self.ema_model.to(device)
-
-    @torch.no_grad()
-    def update(self, model: torch.nn.Module) -> None:
-        """
-        現在のモデル重みで EMA を更新する。
-
-        各オプティマイザステップ後に呼び出すこと。
-        EMA 更新式: ema_weight = decay * ema_weight + (1 - decay) * current_weight
-
-        Args:
-            model: 現在の学習中モデル
-        """
-
-        # DDP の場合は .module を使用
-        source_model = model.module if hasattr(model, "module") else model
-
-        for ema_param, param in zip(
-            self.ema_model.parameters(),
-            source_model.parameters(),
-        ):
-            # EMA 更新: ema = decay * ema + (1 - decay) * current
-            ema_param.data.mul_(self.decay).add_(param.data, alpha=1.0 - self.decay)
-
-    def get_ema_model(self) -> torch.nn.Module:
-        """
-        EMA モデルを取得する。
-
-        チェックポイント保存時や推論時に使用。
-
-        Returns:
-            EMA 重みを持つモデル
-        """
-
-        return self.ema_model
-
-    def state_dict(self) -> dict[str, Any]:
-        """
-        EMA モデルの状態辞書を取得する。
-
-        Returns:
-            EMA モデルの状態辞書
-        """
-
-        return self.ema_model.state_dict()
-
-    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
-        """
-        EMA モデルの状態を復元する。
-
-        Args:
-            state_dict: 以前のチェックポイントからの状態変数を含む辞書。
-        """
-
-        self.ema_model.load_state_dict(state_dict)
 
 
 # グローバル勾配モニターインスタンス (分散学習との互換性のため run() 内で初期化)
@@ -395,22 +107,11 @@ ema_model: EMAModel | None = None
 
 
 def run():
-    # Command line configuration is not recommended unless necessary, use config.yml
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "-c",
-        "--config",
-        type=str,
-        default=config.train_ms_config.config_path,
-        help="JSON file for configuration",
+    paths_config = get_paths_config()
+    parser = argparse.ArgumentParser(
+        description="Train JP-Extra model.",
     )
-    parser.add_argument(
-        "-m",
-        "--model",
-        type=str,
-        help="数据集文件夹路径，请注意，数据不再默认放在/logs文件夹下。如果需要用命令行配置，请声明相对于根目录的路径",
-        default=config.dataset_path,
-    )
+    add_model_argument(parser)
     parser.add_argument(
         "--pretrained_model_dir",
         type=str,
@@ -422,7 +123,13 @@ def run():
         "--assets_root",
         type=str,
         help="Root directory of model assets needed for inference.",
-        default=config.assets_root,
+        default=str(paths_config.assets_root),
+    )
+    parser.add_argument(
+        "--keep_ckpts",
+        type=int,
+        default=1,
+        help="Number of checkpoints to keep. Set to 0 to keep all. Default: 1",
     )
     parser.add_argument(
         "--skip_default_style",
@@ -470,8 +177,13 @@ def run():
     )
     args = parser.parse_args()
 
-    # Set log file
-    model_dir = os.path.join(args.model, config.train_ms_config.model_dir)
+    # TrainingModelPaths を使ってパスを解決
+    model_folder_name: str = args.model
+    paths = TrainingModelPaths(model_folder_name=model_folder_name)
+    assets_root = Path(args.assets_root)
+
+    # チェックポイント保存ディレクトリ (Data/{model_folder_name}/models/)
+    model_dir = str(paths.models_dir)
     pretrained_model_dir = args.pretrained_model_dir or model_dir
     if args.pretrained_model_dir is not None and not os.path.isdir(
         pretrained_model_dir
@@ -481,13 +193,13 @@ def run():
         )
         pretrained_model_dir = model_dir
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    logger.add(os.path.join(args.model, f"train_{timestamp}.log"))
+    logger.add(str(paths.dataset_dir / f"train_{timestamp}.log"))
 
-    # Parsing environment variables
-    envs = config.train_ms_config.env
-    for env_name, env_value in envs.items():
+    # 分散学習用の環境変数をセット
+    # 未設定の変数のみ DEFAULT_TRAIN_ENV から設定される
+    for env_name, env_value in DEFAULT_TRAIN_ENV.items():
         if env_name not in os.environ.keys():
-            logger.info(f"Loading configuration from config {env_value!s}")
+            logger.info(f"Setting default environment variable: {env_name}={env_value}")
             os.environ[env_name] = str(env_value)
     logger.info(
         "Loading environment variables \nMASTER_ADDR: {},\nMASTER_PORT: {},\nWORLD_SIZE: {},\nRANK: {},\nLOCAL_RANK: {}".format(
@@ -511,72 +223,62 @@ def run():
     local_rank = int(os.environ["LOCAL_RANK"])
     n_gpus = dist.get_world_size()
 
-    hps = HyperParameters.load_from_json(args.config)
-    # This is needed because we have to pass values to `train_and_evaluate()`
-    hps.model_dir = model_dir
-    hps.speedup = args.speedup
-    hps.repo_id = args.repo_id
-
-    # 比较路径是否相同
-    if os.path.realpath(args.config) != os.path.realpath(
-        config.train_ms_config.config_path
-    ):
-        with open(args.config, encoding="utf-8") as f:
-            data = f.read()
-        os.makedirs(os.path.dirname(config.train_ms_config.config_path), exist_ok=True)
-        with open(config.train_ms_config.config_path, "w", encoding="utf-8") as f:
-            f.write(data)
+    hps = HyperParameters.load_from_json(paths.config_path)
+    runtime_config = TrainRuntimeConfig(
+        model_name=hps.model_name,
+        model_dir=model_dir,
+        out_dir=str(assets_root / model_folder_name),
+        dataset_path=str(paths.dataset_dir),
+        keep_ckpts=args.keep_ckpts,
+        repo_id=args.repo_id,
+        speedup=args.speedup,
+        spec_cache=True,
+    )
 
     """
-    Path constants are a bit complicated...
-    TODO: Refactor or rename these?
-    (Both `config.yml` and `config.json` are used, which is confusing I think.)
-
-    args.model: For saving all info needed for training.
-        default: `Data/{model_name}`.
-    hps.model_dir := model_dir: For saving checkpoints (for resuming training).
-        default: `Data/{model_name}/models`.
-        (Use `hps` since we have to pass `model_dir` to `train_and_evaluate()`.
-
-    args.assets_root: The root directory of model assets needed for inference.
-        default: config.assets_root == `model_assets`.
-
-    config.out_dir: The directory for model assets of this model (for inference).
-        default: `model_assets/{model_name}`.
+    パス定数について:
+    - args.model: 学習データのフォルダ名 (Data/ 以下)
+    - runtime_config.model_name: config.json の model_name フィールド（ファイル名に使用）
+    - runtime_config.model_dir: チェックポイント保存先 (Data/{model}/models/)
+    - runtime_config.out_dir: 推論用モデルの出力先 (model_assets/{model}/)
+    - runtime_config.dataset_path: データセットパス (Data/{model}/)
     """
 
     if args.repo_id is not None:
         # First try to upload config.json to check if the repo exists
+        assert runtime_config.dataset_path is not None
         try:
             api.upload_file(
-                path_or_fileobj=args.config,
-                path_in_repo=f"Data/{config.model_name}/config.json",
-                repo_id=hps.repo_id,
+                path_or_fileobj=str(paths.config_path),
+                path_in_repo=f"Data/{runtime_config.model_name}/config.json",
+                repo_id=args.repo_id,
             )
-        except Exception as e:
-            logger.error(e)
+        except Exception as ex:
             logger.error(
-                f"Failed to upload files to the repo {hps.repo_id}. Please check if the repo exists and you have logged in using `huggingface-cli login`."
+                f"Failed to upload files to the repo {args.repo_id}. "
+                "Please check if the repo exists and you have logged in using `huggingface-cli login`.",
+                exc_info=ex,
             )
-            raise e
+            raise ex
         # Upload Data dir for resuming training
         api.upload_folder(
-            repo_id=hps.repo_id,
-            folder_path=config.dataset_path,
-            path_in_repo=f"Data/{config.model_name}",
+            repo_id=args.repo_id,
+            folder_path=runtime_config.dataset_path,
+            path_in_repo=f"Data/{runtime_config.model_name}",
             delete_patterns="*.pth",  # Only keep the latest checkpoint
-            ignore_patterns=f"{config.dataset_path}/raw",  # Ignore raw data
+            ignore_patterns="raw/**",  # Ignore raw data
             run_as_future=True,
         )
 
-    os.makedirs(config.out_dir, exist_ok=True)
+    assert runtime_config.out_dir is not None
+    os.makedirs(runtime_config.out_dir, exist_ok=True)
 
     if not args.skip_default_style:
         default_style.save_styles_by_dirs(
-            os.path.join(args.model, "wavs"),
-            config.out_dir,
-            config_path=args.config,
-            config_output_path=os.path.join(config.out_dir, "config.json"),
+            str(paths.wavs_dir),
+            runtime_config.out_dir,
+            config_path=str(paths.config_path),
+            config_output_path=os.path.join(runtime_config.out_dir, "config.json"),
         )
 
     torch.manual_seed(hps.train.seed)
@@ -586,12 +288,14 @@ def run():
     writer = None
     writer_eval = None
     if rank == 0 and not args.speedup:
-        # logger = utils.get_logger(hps.model_dir)
+        # logger = utils.get_logger(runtime_config.model_dir)
         # logger.info(hps)
         utils.check_git_hash(model_dir)
         writer = SummaryWriter(log_dir=model_dir)
         writer_eval = SummaryWriter(log_dir=os.path.join(model_dir, "eval"))
-    train_dataset = TextAudioSpeakerLoader(hps.data.training_files, hps.data)
+    train_dataset = TextAudioSpeakerLoader(
+        hps.data.training_files, hps.data, spec_cache=runtime_config.spec_cache
+    )
     collate_fn = TextAudioSpeakerCollate(use_jp_extra=True)
     if not args.not_use_custom_batch_sampler:
         train_sampler = DistributedBucketSampler(
@@ -646,7 +350,9 @@ def run():
     eval_dataset = None
     eval_loader = None
     if rank == 0 and not args.speedup:
-        eval_dataset = TextAudioSpeakerLoader(hps.data.validation_files, hps.data)
+        eval_dataset = TextAudioSpeakerLoader(
+            hps.data.validation_files, hps.data, spec_cache=runtime_config.spec_cache
+        )
         eval_loader = DataLoader(
             eval_dataset,
             num_workers=0,
@@ -860,7 +566,7 @@ def run():
                 )
             )
             logger.info(
-                f"******************Found the model. Current epoch is {epoch_str}, gloabl step is {global_step}*********************"
+                f"******************Found the model. Current epoch is {epoch_str}, global step is {global_step}*********************"
             )
         except Exception as e:
             logger.warning(e)
@@ -982,7 +688,14 @@ def run():
             ema_path = utils.checkpoints.get_latest_checkpoint_path(
                 model_dir, "EMA_*.pth"
             )
-            ema_state = torch.load(ema_path, map_location="cpu")
+            try:
+                ema_state = torch.load(
+                    ema_path,
+                    map_location="cpu",
+                    weights_only=True,
+                )
+            except TypeError:
+                ema_state = torch.load(ema_path, map_location="cpu")
             ema_model.load_state_dict(ema_state.get("state_dict", {}))
             if "decay" in ema_state:
                 ema_model.decay = float(ema_state["decay"])
@@ -1006,6 +719,7 @@ def run():
                 local_rank,
                 epoch,
                 hps,
+                runtime_config,
                 [net_g, net_d, net_dur_disc, net_wd, wl],
                 [optim_g, optim_d, optim_dur_disc, optim_wd],
                 [scheduler_g, scheduler_d, scheduler_dur_disc, scheduler_wd],
@@ -1023,6 +737,7 @@ def run():
                 local_rank,
                 epoch,
                 hps,
+                runtime_config,
                 [net_g, net_d, net_dur_disc, net_wd, wl],
                 [optim_g, optim_d, optim_dur_disc, optim_wd],
                 [scheduler_g, scheduler_d, scheduler_dur_disc, scheduler_wd],
@@ -1085,31 +800,31 @@ def run():
                 model_to_save,
                 epoch,
                 os.path.join(
-                    config.out_dir,
-                    f"{config.model_name}_e{epoch}_s{global_step}.safetensors",
+                    runtime_config.out_dir,
+                    f"{runtime_config.model_name}_e{epoch}_s{global_step}.safetensors",
                 ),
                 for_infer=True,
             )
-            if hps.repo_id is not None:
+            if runtime_config.repo_id is not None:
                 future1 = api.upload_folder(
-                    repo_id=hps.repo_id,
-                    folder_path=config.dataset_path,
-                    path_in_repo=f"Data/{config.model_name}",
+                    repo_id=runtime_config.repo_id,
+                    folder_path=runtime_config.dataset_path,
+                    path_in_repo=f"Data/{runtime_config.model_name}",
                     delete_patterns="*.pth",  # Only keep the latest checkpoint
-                    ignore_patterns=f"{config.dataset_path}/raw",  # Ignore raw data
+                    ignore_patterns="raw/**",  # Ignore raw data
                     run_as_future=True,
                 )
                 future2 = api.upload_folder(
-                    repo_id=hps.repo_id,
-                    folder_path=config.out_dir,
-                    path_in_repo=f"model_assets/{config.model_name}",
+                    repo_id=runtime_config.repo_id,
+                    folder_path=runtime_config.out_dir,
+                    path_in_repo=f"model_assets/{runtime_config.model_name}",
                     run_as_future=True,
                 )
                 try:
                     future1.result()
                     future2.result()
-                except Exception as e:
-                    logger.error(e)
+                except Exception as ex:
+                    logger.error("Failed to upload to HuggingFace", exc_info=ex)
 
     if pbar is not None:
         pbar.close()
@@ -1120,6 +835,7 @@ def train_and_evaluate(
     local_rank,
     epoch,
     hps: HyperParameters,
+    runtime_config: TrainRuntimeConfig,
     nets,
     optims,
     schedulers,
@@ -1138,7 +854,7 @@ def train_and_evaluate(
     if writers is not None:
         writer, writer_eval = writers
 
-    # DistributedBucketSampler でエポックごとに異なるシャッフルを行わない
+    # マルチ GPU 学習は基本行わないため、DistributedBucketSampler でのシャッフルを固定して再現性を優先する
     # train_loader.batch_sampler.set_epoch(epoch)
     global global_step
 
@@ -1456,7 +1172,7 @@ def train_and_evaluate(
             if (
                 should_step
                 and global_step % hps.train.log_interval == 0
-                and not hps.speedup
+                and not runtime_config.speedup
             ):
                 lr = optim_g.param_groups[0]["lr"]
                 losses = [loss_disc, loss_gen, loss_fm, loss_mel, loss_dur, loss_kl]
@@ -1549,22 +1265,22 @@ def train_and_evaluate(
                 and global_step != 0
                 and initial_step != global_step
             ):
-                if not hps.speedup:
+                if not runtime_config.speedup:
                     evaluate(hps, net_g, eval_loader, writer_eval)
-                assert hps.model_dir is not None
+                assert runtime_config.model_dir is not None
                 utils.checkpoints.save_checkpoint(
                     net_g,
                     optim_g,
                     hps.train.learning_rate,
                     epoch,
-                    os.path.join(hps.model_dir, f"G_{global_step}.pth"),
+                    os.path.join(runtime_config.model_dir, f"G_{global_step}.pth"),
                 )
                 utils.checkpoints.save_checkpoint(
                     net_d,
                     optim_d,
                     hps.train.learning_rate,
                     epoch,
-                    os.path.join(hps.model_dir, f"D_{global_step}.pth"),
+                    os.path.join(runtime_config.model_dir, f"D_{global_step}.pth"),
                 )
                 if net_dur_disc is not None:
                     utils.checkpoints.save_checkpoint(
@@ -1572,7 +1288,9 @@ def train_and_evaluate(
                         optim_dur_disc,
                         hps.train.learning_rate,
                         epoch,
-                        os.path.join(hps.model_dir, f"DUR_{global_step}.pth"),
+                        os.path.join(
+                            runtime_config.model_dir, f"DUR_{global_step}.pth"
+                        ),
                     )
                 if net_wd is not None:
                     utils.checkpoints.save_checkpoint(
@@ -1580,7 +1298,7 @@ def train_and_evaluate(
                         optim_wd,
                         hps.train.learning_rate,
                         epoch,
-                        os.path.join(hps.model_dir, f"WD_{global_step}.pth"),
+                        os.path.join(runtime_config.model_dir, f"WD_{global_step}.pth"),
                     )
                 if ema_model is not None:
                     ema_state = {
@@ -1589,13 +1307,14 @@ def train_and_evaluate(
                     }
                     torch.save(
                         ema_state,
-                        os.path.join(hps.model_dir, f"EMA_{global_step}.pth"),
+                        os.path.join(
+                            runtime_config.model_dir, f"EMA_{global_step}.pth"
+                        ),
                     )
-                keep_ckpts = config.train_ms_config.keep_ckpts
-                if keep_ckpts > 0:
+                if runtime_config.keep_ckpts > 0:
                     utils.checkpoints.clean_checkpoints(
-                        model_dir_path=hps.model_dir,
-                        n_ckpts_to_keep=keep_ckpts,
+                        model_dir_path=runtime_config.model_dir,
+                        n_ckpts_to_keep=runtime_config.keep_ckpts,
                         sort_by_time=True,
                     )
                 # Save safetensors (for inference) to `model_assets/{model_name}`
@@ -1607,24 +1326,24 @@ def train_and_evaluate(
                     model_to_save,
                     epoch,
                     os.path.join(
-                        config.out_dir,
-                        f"{config.model_name}_e{epoch}_s{global_step}.safetensors",
+                        runtime_config.out_dir,
+                        f"{runtime_config.model_name}_e{epoch}_s{global_step}.safetensors",
                     ),
                     for_infer=True,
                 )
-                if hps.repo_id is not None:
+                if runtime_config.repo_id is not None:
                     api.upload_folder(
-                        repo_id=hps.repo_id,
-                        folder_path=config.dataset_path,
-                        path_in_repo=f"Data/{config.model_name}",
+                        repo_id=runtime_config.repo_id,
+                        folder_path=runtime_config.dataset_path,
+                        path_in_repo=f"Data/{runtime_config.model_name}",
                         delete_patterns="*.pth",  # Only keep the latest checkpoint
-                        ignore_patterns=f"{config.dataset_path}/raw",  # Ignore raw data
+                        ignore_patterns="raw/**",  # Ignore raw data
                         run_as_future=True,
                     )
                     api.upload_folder(
-                        repo_id=hps.repo_id,
-                        folder_path=config.out_dir,
-                        path_in_repo=f"model_assets/{config.model_name}",
+                        repo_id=runtime_config.repo_id,
+                        folder_path=runtime_config.out_dir,
+                        path_in_repo=f"model_assets/{runtime_config.model_name}",
                         run_as_future=True,
                     )
 
