@@ -20,7 +20,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from scipy.io import wavfile
 
-from config import get_config
 from style_bert_vits2.constants import (
     DEFAULT_ASSIST_TEXT_WEIGHT,
     DEFAULT_LENGTH,
@@ -41,10 +40,11 @@ from style_bert_vits2.nlp.japanese.normalizer import normalize_text
 from style_bert_vits2.nlp.japanese.user_dict import update_dict
 from style_bert_vits2.tts_model import TTSModel, TTSModelHolder
 from style_bert_vits2.utils import torch_device_to_onnx_providers
+from style_bert_vits2.utils.paths import get_paths_config
 
 
-config = get_config()
-ln = config.server_config.language
+# デフォルト言語
+ln = Languages.JP
 
 
 # pyopenjtalk_worker を起動
@@ -86,12 +86,32 @@ def load_models(model_holder: TTSModelHolder):
 
 
 if __name__ == "__main__":
+    paths_config = get_paths_config()
     parser = argparse.ArgumentParser()
     parser.add_argument("--cpu", action="store_true", help="Use CPU instead of GPU")
     parser.add_argument(
-        "--dir", "-d", type=str, help="Model directory", default=config.assets_root
+        "--dir",
+        "-d",
+        type=str,
+        help="Model directory",
+        default=str(paths_config.assets_root),
     )
     parser.add_argument("--preload_onnx_bert", action="store_true")
+    parser.add_argument("--port", "-p", type=int, help="Server port", default=5000)
+    parser.add_argument(
+        "--limit",
+        "-l",
+        type=int,
+        help="Text length limit (-1 for no limit)",
+        default=100,
+    )
+    parser.add_argument(
+        "--origins",
+        type=str,
+        nargs="*",
+        help="CORS allowed origins",
+        default=["*"],
+    )
     args = parser.parse_args()
 
     if args.cpu:
@@ -122,22 +142,21 @@ if __name__ == "__main__":
     logger.info("Loading models...")
     load_models(model_holder)
 
-    limit = config.server_config.limit
-    if limit < 1:
-        limit = None
-    else:
+    limit_arg: int = args.limit
+    limit: int | None = limit_arg if limit_arg >= 1 else None
+    if limit is not None:
         logger.info(
-            f"The maximum length of the text is {limit}. If you want to change it, modify config.yml. Set limit to -1 to remove the limit."
+            f"The maximum length of the text is {limit}. You can change it with --limit argument. Set --limit -1 to remove the limit."
         )
     app = FastAPI()
-    allow_origins = config.server_config.origins
+    allow_origins: list[str] = args.origins
     if allow_origins:
         logger.warning(
-            f"CORS allow_origins: {config.server_config.origins}. If you don't want, modify config.yml"
+            f"CORS allow_origins: {allow_origins}. You can change it with --origins argument."
         )
         app.add_middleware(
             CORSMiddleware,
-            allow_origins=config.server_config.origins,
+            allow_origins=allow_origins,
             allow_credentials=True,
             allow_methods=["*"],
             allow_headers=["*"],
@@ -199,6 +218,7 @@ if __name__ == "__main__":
         ),
     ):
         """Infer text to speech(テキストから感情付き音声を生成する)"""
+        assert request.client is not None
         logger.info(
             f"{request.client.host}:{request.client.port}/voice  {unquote(str(request.query_params))}"
         )
@@ -336,6 +356,7 @@ if __name__ == "__main__":
         request: Request, path: str = Query(..., description="local wav path")
     ):
         """wavデータを取得する"""
+        assert request.client is not None
         logger.info(
             f"{request.client.host}:{request.client.port}/tools/get_audio  {unquote(str(request.query_params))}"
         )
@@ -345,11 +366,10 @@ if __name__ == "__main__":
             raise_validation_error(f"wav file not found in {path}", "path")
         return FileResponse(path=path, media_type="audio/wav")
 
-    logger.info(f"server listen: http://127.0.0.1:{config.server_config.port}")
-    logger.info(f"API docs: http://127.0.0.1:{config.server_config.port}/docs")
+    port: int = args.port
+    logger.info(f"server listen: http://127.0.0.1:{port}")
+    logger.info(f"API docs: http://127.0.0.1:{port}/docs")
     logger.info(
-        f"Input text length limit: {limit}. You can change it in server.limit in config.yml"
+        f"Input text length limit: {limit}. You can change it with --limit argument."
     )
-    uvicorn.run(
-        app, port=config.server_config.port, host="0.0.0.0", log_level="warning"
-    )
+    uvicorn.run(app, port=port, host="0.0.0.0", log_level="warning")

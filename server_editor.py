@@ -28,7 +28,6 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from scipy.io import wavfile
 
-from config import get_path_config
 from style_bert_vits2.constants import (
     DEFAULT_ASSIST_TEXT_WEIGHT,
     DEFAULT_NOISE,
@@ -53,6 +52,7 @@ from style_bert_vits2.nlp.japanese.user_dict import (
 )
 from style_bert_vits2.tts_model import TTSModelHolder, TTSModelInfo
 from style_bert_vits2.utils import torch_device_to_onnx_providers
+from style_bert_vits2.utils.paths import get_paths_config
 
 
 # ---フロントエンド部分に関する処理---
@@ -168,9 +168,9 @@ origins = [
     "http://127.0.0.1:8000",
 ]
 
-path_config = get_path_config()
 parser = argparse.ArgumentParser()
-parser.add_argument("--model_dir", type=str, default=path_config.assets_root)
+paths_config = get_paths_config()
+parser.add_argument("--model_dir", type=str, default=str(paths_config.assets_root))
 parser.add_argument("--device", type=str, default="cuda")
 parser.add_argument("--port", type=int, default=8000)
 parser.add_argument("--inbrowser", action="store_true")
