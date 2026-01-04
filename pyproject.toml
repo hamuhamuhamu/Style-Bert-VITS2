@@ -277,10 +277,41 @@ typeCheckingMode = "strict"
 # プロジェクトルートを指定
 pythonPlatform = "All"
 # インクルードするパッケージパス
+# TODO: 型安全でないコードが多いため、当面一部ファイルのみ型チェックを行わない
 include = [
     "style_bert_vits2/",
     "scripts/",
     "tests/",
+    # Gradio WebUI
+    # "gradio_tabs/",
+    "app.py",
+    # サーバー
+    "server_editor.py",
+    "server_fastapi.py",
+    # 前処理スクリプト
+    "bert_gen.py",
+    "check_dataset_integrity.py",
+    "external_spk_emb_gen.py",
+    "preprocess_all.py",
+    "preprocess_text.py",
+    "resample.py",
+    "slice.py",
+    "style_gen.py",
+    "transcribe.py",
+    # 学習スクリプト
+    # "train_ms.py",
+    # "train_ms_jp_extra.py",
+    # "train_ms_nanairo.py",
+    # 学習スクリプトから呼ばれるモジュール
+    "data_utils.py",
+    "default_style.py",
+    # "losses.py",
+    # "mel_processing.py",
+    # ユーティリティー
+    "convert_bert_onnx.py",
+    "convert_onnx.py",
+    "initialize.py",
+    "speech_mos.py",
 ]
 # 除外するパス
 exclude = [

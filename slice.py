@@ -9,8 +9,8 @@ import soundfile as sf
 import torch
 from tqdm import tqdm
 
-from config import get_path_config
 from style_bert_vits2.logging import logger
+from style_bert_vits2.utils.paths import add_model_argument, get_paths_config
 from style_bert_vits2.utils.stdout_wrapper import SAFE_STDOUT
 
 
@@ -110,12 +110,7 @@ def split_wav(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--min_sec", "-m", type=float, default=2, help="Minimum seconds of a slice"
-    )
-    parser.add_argument(
-        "--max_sec", "-M", type=float, default=12, help="Maximum seconds of a slice"
-    )
+    add_model_argument(parser)
     parser.add_argument(
         "--input_dir",
         "-i",
@@ -124,10 +119,10 @@ if __name__ == "__main__":
         help="Directory of input wav files",
     )
     parser.add_argument(
-        "--model_name",
-        type=str,
-        required=True,
-        help="The result will be in Data/{model_name}/raw/ (if Data is dataset_root in configs/paths.yml)",
+        "--min_sec", type=float, default=2, help="Minimum seconds of a slice"
+    )
+    parser.add_argument(
+        "--max_sec", "-M", type=float, default=12, help="Maximum seconds of a slice"
     )
     parser.add_argument(
         "--min_silence_dur_ms",
@@ -150,12 +145,10 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    path_config = get_path_config()
-    dataset_root = path_config.dataset_root
-
-    model_name = str(args.model_name)
+    paths_config = get_paths_config()
+    model_name = str(args.model)
     input_dir = Path(args.input_dir)
-    output_dir = dataset_root / model_name / "raw"
+    output_dir = paths_config.dataset_root / model_name / "raw"
     min_sec: float = args.min_sec
     max_sec: float = args.max_sec
     min_silence_dur_ms: int = args.min_silence_dur_ms

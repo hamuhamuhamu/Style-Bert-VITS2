@@ -18,7 +18,7 @@ def do_slice(
     logger.info("Start slicing...")
     cmd = [
         "slice.py",
-        "--model_name",
+        "--model",
         model_name,
         "--min_sec",
         str(min_sec),
@@ -59,9 +59,9 @@ def do_transcribe(
 
     cmd = [
         "transcribe.py",
-        "--model_name",
-        model_name,
         "--model",
+        model_name,
+        "--whisper-model",
         whisper_model,
         "--compute_type",
         compute_type,

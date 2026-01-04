@@ -260,7 +260,7 @@ class EMAModel:
         if device is not None:
             self.ema_model.to(device)
 
-    @torch.no_grad()
+    @torch.no_grad()  # type: ignore[misc]
     def update(self, model: torch.nn.Module) -> None:
         """
         現在のモデル重みで EMA を更新する。

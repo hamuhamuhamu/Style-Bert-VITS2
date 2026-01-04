@@ -118,7 +118,7 @@ for _, step, scores in results:
     mos_values.append(scores)  # scores は MOS1, MOS2, MOS3,..., mean のリスト
 
 # DataFrame形式に変換
-df = pd.DataFrame(mos_values, index=steps)
+df = pd.DataFrame(mos_values, index=pd.Index(steps))
 # ステップ数でソート
 df = df.sort_index()
 
