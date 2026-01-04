@@ -98,8 +98,8 @@ def _extract_features(
     if wav.size == 0:
         raise ValueError("Audio file is empty")
 
-    f0, t = pyworld.dio(wav.astype(np.float64), sr)
-    f0 = pyworld.stonemask(wav.astype(np.float64), f0, t, sr)
+    f0, t = pyworld.dio(wav.astype(np.float64), int(sr))
+    f0 = pyworld.stonemask(wav.astype(np.float64), f0, t, int(sr))
     voiced = f0 > 0
     if np.any(voiced):
         f0_mean = float(np.mean(f0[voiced]))

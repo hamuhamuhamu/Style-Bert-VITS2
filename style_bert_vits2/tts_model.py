@@ -315,10 +315,12 @@ class TTSModel:
             # スタイルベクトルを取得するための推論モデルを初期化
             import torch
 
+            model = pyannote.audio.Model.from_pretrained(
+                "pyannote/wespeaker-voxceleb-resnet34-LM"
+            )
+            assert model is not None
             self.style_vector_inference = pyannote.audio.Inference(
-                model=pyannote.audio.Model.from_pretrained(
-                    "pyannote/wespeaker-voxceleb-resnet34-LM"
-                ),
+                model=model,
                 window="whole",
             )
             self.style_vector_inference.to(torch.device(self.device))
