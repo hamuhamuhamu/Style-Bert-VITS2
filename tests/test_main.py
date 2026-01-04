@@ -8,6 +8,7 @@ from scipy.io import wavfile
 from style_bert_vits2.constants import BASE_DIR, Languages
 from style_bert_vits2.logging import logger
 from style_bert_vits2.tts_model import TTSModelHolder
+from style_bert_vits2.utils.paths import get_paths_config
 
 
 # 多様なサンプルテキストリスト (50個程度)
@@ -87,8 +88,9 @@ def synthesize(
     use_fp16: bool = False,
 ):
     # 音声合成モデルが配置されていれば、音声合成を実行
+    assets_root = get_paths_config().assets_root
     model_holder = TTSModelHolder(
-        BASE_DIR / "model_assets",
+        assets_root,
         device=device,
         onnx_providers=onnx_providers,
         use_fp16=use_fp16,

@@ -1,10 +1,8 @@
 import argparse
-from pathlib import Path
 
 import gradio as gr
 import torch
 
-from config import get_path_config
 from gradio_tabs.convert_onnx import create_onnx_app
 from gradio_tabs.dataset import create_dataset_app
 from gradio_tabs.inference import create_inference_app
@@ -16,6 +14,7 @@ from style_bert_vits2.nlp.japanese import pyopenjtalk_worker
 from style_bert_vits2.nlp.japanese.user_dict import update_dict
 from style_bert_vits2.tts_model import TTSModelHolder
 from style_bert_vits2.utils import torch_device_to_onnx_providers
+from style_bert_vits2.utils.paths import get_paths_config
 
 
 # このプロセスからはワーカーを起動して辞書を使いたいので、ここで初期化
@@ -41,9 +40,9 @@ if device == "cuda" and not torch.cuda.is_available():
 # if not args.skip_default_models:
 #     download_default_models()
 
-path_config = get_path_config()
+paths_config = get_paths_config()
 model_holder = TTSModelHolder(
-    Path(path_config.assets_root),
+    paths_config.assets_root,
     device,
     torch_device_to_onnx_providers(device),
     ignore_onnx=False,

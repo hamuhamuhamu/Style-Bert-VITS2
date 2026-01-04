@@ -111,11 +111,6 @@ class HyperParameters(BaseModel):
     data: HyperParametersData = HyperParametersData()
     model: HyperParametersModel = HyperParametersModel()
 
-    # 以下は学習時にのみ動的に設定されるパラメータ (通常 config.json には存在しない)
-    model_dir: str | None = None
-    speedup: bool = False
-    repo_id: str | None = None
-
     # model_ 以下を Pydantic の保護対象から除外する
     model_config = ConfigDict(protected_namespaces=())
 

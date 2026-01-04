@@ -13,6 +13,7 @@ from anime_speaker_embedding import AnimeSpeakerEmbedding
 
 from style_bert_vits2.logging import logger
 from style_bert_vits2.models.utils import load_filepaths_and_text
+from style_bert_vits2.utils.paths import TrainingModelPaths, add_model_argument
 
 
 def _parse_args() -> argparse.Namespace:
@@ -24,7 +25,7 @@ def _parse_args() -> argparse.Namespace:
     """
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--list", type=str, required=True)
+    add_model_argument(parser)
     parser.add_argument(
         "--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu"
     )
@@ -58,11 +59,16 @@ def main() -> None:
     """
 
     args = _parse_args()
-    list_path = Path(args.list)
-    audio_paths = _iter_audio_paths(list_path)
+    model_folder_name: str = args.model
+    paths = TrainingModelPaths(model_folder_name)
+
+    # train.list と val.list から音声パスを取得
+    audio_paths: list[str] = []
+    audio_paths.extend(_iter_audio_paths(paths.train_list_path))
+    audio_paths.extend(_iter_audio_paths(paths.val_list_path))
 
     if len(audio_paths) == 0:
-        raise ValueError("No audio paths found in list file.")
+        raise ValueError("No audio paths found in list files.")
 
     logger.info("Loading anime speaker embedding model.")
     model = AnimeSpeakerEmbedding(device=args.device, variant="char")

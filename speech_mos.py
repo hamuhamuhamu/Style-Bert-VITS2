@@ -10,9 +10,9 @@ import pandas as pd
 import torch
 from tqdm import tqdm
 
-from config import get_path_config
 from style_bert_vits2.logging import logger
 from style_bert_vits2.tts_model import TTSModel
+from style_bert_vits2.utils.paths import get_paths_config
 
 
 warnings.filterwarnings("ignore")
@@ -35,8 +35,6 @@ test_texts = [
     "この分野の最新の研究成果を使うと、より自然で表現豊かな音声の生成が可能である。深層学習の応用により、感情やアクセントを含む声質の微妙な変化も再現することが出来る。",
 ]
 
-path_config = get_path_config()
-
 predictor = torch.hub.load(
     "tarepan/SpeechMOS:v1.2.0", "utmos22_strong", trust_repo=True
 )
@@ -50,12 +48,12 @@ args = parser.parse_args()
 model_name: str = args.model_name
 device: str = args.device
 
-model_path = path_config.assets_root / model_name
-# .safetensorsファイルを検索
+model_path = get_paths_config().assets_root / model_name
+# .safetensors ファイルを検索
 safetensors_files = model_path.glob("*.safetensors")
 
 
-def get_model(model_file: Path):
+def get_model(model_file: Path) -> TTSModel:
     return TTSModel(
         model_path=model_file,
         config_path=model_file.parent / "config.json",
@@ -83,7 +81,7 @@ for model_file in tqdm(safetensors_files, dynamic_ncols=True):
     for i, text in enumerate(test_texts):
         sr, audio = model.infer(text)
         audio = audio.astype("float32")
-        score = predictor(torch.from_numpy(audio).unsqueeze(0), sr).item()
+        score = predictor(torch.from_numpy(audio).unsqueeze(0), sr).item()  # type: ignore
         scores.append(score)
         logger.info(f"score: {score}")
     results.append((model_file.name, step, scores))

@@ -10,6 +10,7 @@ from pathlib import Path
 from style_bert_vits2.logging import logger
 from style_bert_vits2.models.hyper_parameters import HyperParameters
 from style_bert_vits2.models.utils import load_filepaths_and_text
+from style_bert_vits2.utils.paths import TrainingModelPaths, add_model_argument
 
 
 def _parse_args() -> argparse.Namespace:
@@ -21,12 +22,7 @@ def _parse_args() -> argparse.Namespace:
     """
 
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--config",
-        type=str,
-        required=True,
-        help="Path to config JSON used for training.",
-    )
+    add_model_argument(parser)
     parser.add_argument(
         "--max_errors",
         type=int,
@@ -158,7 +154,9 @@ def main() -> None:
     """
 
     args = _parse_args()
-    hps = HyperParameters.load_from_json(args.config)
+    model_folder_name: str = args.model
+    paths = TrainingModelPaths(model_folder_name)
+    hps = HyperParameters.load_from_json(paths.config_path)
 
     train_list_path = _ensure_list_path(hps.data.training_files)
     val_list_path = _ensure_list_path(hps.data.validation_files)
