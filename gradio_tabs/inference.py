@@ -732,13 +732,14 @@ def create_inference_app(model_holder: TTSModelHolder) -> gr.Blocks:
 if __name__ == "__main__":
     import torch
 
-    from config import get_path_config
+    from style_bert_vits2.utils.paths import get_paths_config
 
-    path_config = get_path_config()
-    assets_root = path_config.assets_root
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    paths_config = get_paths_config()
     model_holder = TTSModelHolder(
-        assets_root, device, torch_device_to_onnx_providers(device)
+        paths_config.assets_root,
+        device,
+        torch_device_to_onnx_providers(device),
     )
     app = create_inference_app(model_holder)
     app.launch(inbrowser=True)

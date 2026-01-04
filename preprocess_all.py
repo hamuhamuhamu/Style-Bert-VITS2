@@ -4,6 +4,7 @@ from multiprocessing import cpu_count
 from gradio_tabs.train import preprocess_all
 from style_bert_vits2.nlp.japanese import pyopenjtalk_worker
 from style_bert_vits2.nlp.japanese.user_dict import update_dict
+from style_bert_vits2.utils.paths import add_model_argument
 
 
 # このプロセスからはワーカーを起動して辞書を使いたいので、ここで初期化
@@ -14,9 +15,7 @@ update_dict()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--model_name", "-m", type=str, help="Model name", required=True
-    )
+    add_model_argument(parser)
     parser.add_argument("--batch_size", "-b", type=int, help="Batch size", default=2)
     parser.add_argument("--epochs", "-e", type=int, help="Epochs", default=100)
     parser.add_argument(
@@ -94,7 +93,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     preprocess_all(
-        model_name=args.model_name,
+        model_name=args.model,
         batch_size=args.batch_size,
         epochs=args.epochs,
         save_every_steps=args.save_every_steps,

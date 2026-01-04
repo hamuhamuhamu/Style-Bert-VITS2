@@ -1,11 +1,18 @@
+"""
+BERT 特徴量生成スクリプト。
+
+train.list / val.list から読み込んだ音声ファイルに対応する
+BERT 特徴量を生成し、.bert.pt ファイルとして保存する。
+"""
+
 import argparse
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import torch
 import torch.multiprocessing as mp
 from tqdm import tqdm
 
-from config import get_config
 from style_bert_vits2.constants import Languages
 from style_bert_vits2.logging import logger
 from style_bert_vits2.models import commons
@@ -17,10 +24,10 @@ from style_bert_vits2.nlp import (
 )
 from style_bert_vits2.nlp.japanese import pyopenjtalk_worker
 from style_bert_vits2.nlp.japanese.user_dict import update_dict
+from style_bert_vits2.utils.paths import TrainingModelPaths, add_model_argument
 from style_bert_vits2.utils.stdout_wrapper import SAFE_STDOUT
 
 
-config = get_config()
 # このプロセスからはワーカーを起動して辞書を使いたいので、ここで初期化
 pyopenjtalk_worker.initialize_worker()
 
@@ -28,10 +35,19 @@ pyopenjtalk_worker.initialize_worker()
 update_dict()
 
 
-def process_line(x: tuple[str, bool]):
-    line, add_blank = x
-    device = config.bert_gen_config.device
-    if config.bert_gen_config.use_multi_device:
+def process_line(
+    x: tuple[str, bool, str, bool],
+) -> None:
+    """
+    1行のデータを処理し、BERT 特徴量を生成する。
+
+    Args:
+        x (tuple[str, bool, str, bool]): (行データ, add_blank フラグ, デバイス, マルチデバイス使用フラグ) のタプル
+    """
+
+    line, add_blank, device, use_multi_device = x
+
+    if use_multi_device:
         rank = mp.current_process()._identity
         rank = rank[0] if len(rank) > 0 else 0
         if torch.cuda.is_available():
@@ -39,11 +55,13 @@ def process_line(x: tuple[str, bool]):
             device = f"cuda:{gpu_id}"
         else:
             device = "cpu"
+
     wav_path, _, language_str, text, phones, tone, word2ph = line.strip().split("|")
     phone = phones.split(" ")
     tone = [int(i) for i in tone.split(" ")]
     word2ph = [int(i) for i in word2ph.split(" ")]
     word2ph = [i for i in word2ph]
+
     # g2p 処理では対応しているが現行モデルでは対応していない特定音素を、対応する音素にフォールバックする
     # 変更は引数で与えられた phone / tone / word2ph に in-place で適用される
     convert_unsupported_phones_for_current_model(
@@ -72,31 +90,69 @@ def process_line(x: tuple[str, bool]):
         torch.save(bert, bert_path)
 
 
-preprocess_text_config = config.preprocess_text_config
-
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "-c", "--config", type=str, default=config.bert_gen_config.config_path
+    parser = argparse.ArgumentParser(
+        description="Generate BERT features for audio files.",
     )
-    args, _ = parser.parse_known_args()
-    config_path = args.config
+    add_model_argument(parser)
+    parser.add_argument(
+        "--num_processes",
+        type=int,
+        default=1,
+        help="Number of parallel processes (default: 1)",
+    )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="cuda" if torch.cuda.is_available() else "cpu",
+        help="Device to use for BERT feature extraction (default: cuda if available)",
+    )
+    parser.add_argument(
+        "--use_multi_device",
+        action="store_true",
+        default=False,
+        help="Use multiple GPUs for parallel processing",
+    )
+    args = parser.parse_args()
+
+    # TrainingModelPaths を使ってパスを解決
+    model_folder_name: str = args.model
+    paths = TrainingModelPaths(model_folder_name)
+    config_path = paths.config_path
+
     hps = HyperParameters.load_from_json(config_path)
     lines: list[str] = []
-    with open(hps.data.training_files, encoding="utf-8") as f:
+
+    train_files_path = Path(hps.data.training_files)
+    val_files_path = Path(hps.data.validation_files)
+
+    with open(train_files_path, encoding="utf-8") as f:
         lines.extend(f.readlines())
 
-    with open(hps.data.validation_files, encoding="utf-8") as f:
+    with open(val_files_path, encoding="utf-8") as f:
         lines.extend(f.readlines())
-    add_blank = [hps.data.add_blank] * len(lines)
+
+    add_blank = hps.data.add_blank
+    device: str = args.device
+    use_multi_device: bool = args.use_multi_device
+    num_processes: int = args.num_processes
 
     if len(lines) != 0:
-        # pyopenjtalkの別ワーカー化により、並列処理でエラーがでる模様なので、一旦シングルスレッド強制にする
+        # pyopenjtalk の別ワーカー化により、並列処理でエラーが出る模様なので、
+        # 一旦シングルスレッド強制にする
+        if num_processes != 1:
+            logger.warning(
+                f"--num_processes={num_processes} was specified, but forcing to 1 "
+                "due to pyopenjtalk worker compatibility issues."
+            )
         num_processes = 1
         with ThreadPoolExecutor(max_workers=num_processes) as executor:
             _ = list(
                 tqdm(
-                    executor.map(process_line, zip(lines, add_blank)),
+                    executor.map(
+                        process_line,
+                        [(line, add_blank, device, use_multi_device) for line in lines],
+                    ),
                     total=len(lines),
                     file=SAFE_STDOUT,
                     dynamic_ncols=True,

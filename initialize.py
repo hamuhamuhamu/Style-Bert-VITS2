@@ -7,6 +7,7 @@ import yaml
 from huggingface_hub import hf_hub_download
 
 from style_bert_vits2.logging import logger
+from style_bert_vits2.utils.paths import get_paths_config
 
 
 def download_bert_models():
@@ -51,6 +52,7 @@ def download_jp_extra_pretrained_models():
 
 
 def download_default_models():
+    assets_root = get_paths_config().assets_root
     files = [
         "jvnv-F1-jp/config.json",
         "jvnv-F1-jp/jvnv-F1-jp_e160_s14000.safetensors",
@@ -66,12 +68,12 @@ def download_default_models():
         "jvnv-M2-jp/style_vectors.npy",
     ]
     for file in files:
-        if not Path(f"model_assets/{file}").exists():
+        if not (assets_root / file).exists():
             logger.info(f"Downloading {file}")
             hf_hub_download(
                 "litagin/style_bert_vits2_jvnv",
                 file,
-                local_dir="model_assets",
+                local_dir=str(assets_root),
             )
     additional_files = {
         "litagin/sbv2_koharune_ami": [
@@ -87,12 +89,12 @@ def download_default_models():
     }
     for repo_id, files in additional_files.items():
         for file in files:
-            if not Path(f"model_assets/{file}").exists():
+            if not (assets_root / file).exists():
                 logger.info(f"Downloading {file}")
                 hf_hub_download(
                     repo_id,
                     file,
-                    local_dir="model_assets",
+                    local_dir=str(assets_root),
                 )
 
 

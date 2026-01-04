@@ -1,3 +1,10 @@
+"""
+音声ファイルのリサンプリングスクリプト。
+
+raw/ ディレクトリ内の音声ファイルを指定したサンプリングレートに変換し、
+wavs/ ディレクトリに出力する。
+"""
+
 import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from multiprocessing import cpu_count
@@ -10,8 +17,8 @@ import soundfile
 from numpy.typing import NDArray
 from tqdm import tqdm
 
-from config import get_config
 from style_bert_vits2.logging import logger
+from style_bert_vits2.utils.paths import TrainingModelPaths, add_model_argument
 from style_bert_vits2.utils.stdout_wrapper import SAFE_STDOUT
 
 
@@ -22,12 +29,29 @@ class BlockSizeException(Exception):
     pass
 
 
-def normalize_audio(data: NDArray[Any], sr: int):
+def normalize_audio(data: NDArray[Any], sr: int) -> NDArray[Any]:
+    """
+    音声データをラウドネス正規化する。
+
+    ITU-R BS.1770 規格に基づいたラウドネス測定を行い、
+    -23 LUFS に正規化する。
+
+    Args:
+        data (NDArray[Any]): 音声データ（numpy 配列）
+        sr (int): サンプリングレート
+
+    Returns:
+        NDArray[Any]: 正規化された音声データ
+
+    Raises:
+        BlockSizeException: 音声が短すぎてラウドネス測定ができない場合
+    """
+
     meter = pyln.Meter(sr, block_size=DEFAULT_BLOCK_SIZE)  # create BS.1770 meter
     try:
         loudness = meter.integrated_loudness(data)
-    except ValueError as e:
-        raise BlockSizeException(e)
+    except ValueError as ex:
+        raise BlockSizeException(ex)
 
     data = pyln.normalize.loudness(data, loudness, -23.0)
     return data
@@ -40,14 +64,25 @@ def resample(
     target_sr: int,
     normalize: bool,
     trim: bool,
-):
+) -> None:
     """
-    fileを読み込んで、target_srなwavファイルに変換して、
-    output_dirの中に、input_dirからの相対パスを保つように保存する
+    音声ファイルを読み込み、指定したサンプリングレートで保存する。
+
+    input_dir からの相対パスを保持したまま output_dir に保存する。
+    出力ファイルの拡張子は常に .wav になる。
+
+    Args:
+        file (Path): 入力ファイルのパス
+        input_dir (Path): 入力ディレクトリのルートパス
+        output_dir (Path): 出力ディレクトリのルートパス
+        target_sr (int): 目標サンプリングレート
+        normalize (bool): ラウドネス正規化を行うかどうか
+        trim (bool): 無音部分をトリムするかどうか
     """
+
     try:
-        # librosaが読めるファイルかチェック
-        # wav以外にもmp3やoggやflacなども読める
+        # librosa が読めるファイルかチェック
+        # wav 以外にも mp3 や ogg や flac なども読める
         wav, sr = librosa.load(file, sr=target_sr)
         if normalize:
             try:
@@ -60,68 +95,60 @@ def resample(
         if trim:
             wav, _ = librosa.effects.trim(wav, top_db=30)
         relative_path = file.relative_to(input_dir)
-        # ここで拡張子が.wav以外でも.wavに置き換えられる
+        # ここで拡張子が .wav 以外でも .wav に置き換えられる
         output_path = output_dir / relative_path.with_suffix(".wav")
         output_path.parent.mkdir(parents=True, exist_ok=True)
         soundfile.write(output_path, wav, sr)
-    except Exception as e:
-        logger.warning(f"Cannot load file, so skipping: {file}, {e}")
+    except Exception as ex:
+        logger.warning(f"Cannot load file, so skipping: {file}", exc_info=ex)
 
 
 if __name__ == "__main__":
-    config = get_config()
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description="Resample audio files in raw/ directory to wavs/ directory.",
+    )
+    add_model_argument(parser)
     parser.add_argument(
         "--sr",
         type=int,
-        default=config.resample_config.sampling_rate,
-        help="sampling rate",
-    )
-    parser.add_argument(
-        "--input_dir",
-        "-i",
-        type=str,
-        default=config.resample_config.in_dir,
-        help="path to source dir",
-    )
-    parser.add_argument(
-        "--output_dir",
-        "-o",
-        type=str,
-        default=config.resample_config.out_dir,
-        help="path to target dir",
+        default=44100,
+        help="Target sampling rate (default: 44100)",
     )
     parser.add_argument(
         "--num_processes",
         type=int,
         default=4,
-        help="cpu_processes",
+        help="Number of parallel processes (0 = auto)",
     )
     parser.add_argument(
         "--normalize",
         action="store_true",
         default=False,
-        help="loudness normalize audio",
+        help="Apply loudness normalization",
     )
     parser.add_argument(
         "--trim",
         action="store_true",
         default=False,
-        help="trim silence (start and end only)",
+        help="Trim silence at start and end",
     )
     args = parser.parse_args()
+
+    # TrainingModelPaths を使ってパスを解決
+    model_folder_name: str = args.model
+    paths = TrainingModelPaths(model_folder_name)
 
     if args.num_processes == 0:
         processes = cpu_count() - 2 if cpu_count() > 4 else 1
     else:
         processes: int = args.num_processes
 
-    input_dir = Path(args.input_dir)
-    output_dir = Path(args.output_dir)
+    input_dir = paths.raw_dir
+    output_dir = paths.wavs_dir
     logger.info(f"Resampling {input_dir} to {output_dir}")
-    sr = int(args.sr)
-    normalize: bool = args.normalize
-    trim: bool = args.trim
+    sr: int = int(args.sr)
+    normalize_flag: bool = args.normalize
+    trim_flag: bool = args.trim
 
     # librosa / soundfile がサポートする音声ファイルの拡張子でフィルタリング
     # ref: https://librosa.org/doc/0.11.0/troubleshooting.html
@@ -150,7 +177,9 @@ if __name__ == "__main__":
 
     with ThreadPoolExecutor(max_workers=processes) as executor:
         futures = [
-            executor.submit(resample, file, input_dir, output_dir, sr, normalize, trim)
+            executor.submit(
+                resample, file, input_dir, output_dir, sr, normalize_flag, trim_flag
+            )
             for file in original_files
         ]
         for future in tqdm(

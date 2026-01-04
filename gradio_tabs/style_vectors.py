@@ -18,20 +18,20 @@ from sklearn.cluster import DBSCAN, AgglomerativeClustering, KMeans
 from sklearn.manifold import TSNE
 from umap import UMAP
 
-from config import get_path_config
 from default_style import save_styles_by_dirs
 from style_bert_vits2.constants import DEFAULT_STYLE, GRADIO_THEME
 from style_bert_vits2.logging import logger
 from style_bert_vits2.tts_model import TTSModel
+from style_bert_vits2.utils.paths import get_paths_config
 from style_bert_vits2.utils.style_strength import (
     apply_style_strength,
     load_style_strength,
 )
 
 
-path_config = get_path_config()
-dataset_root = path_config.dataset_root
-assets_root = path_config.assets_root
+paths_config = get_paths_config()
+dataset_root = paths_config.dataset_root
+assets_root = paths_config.assets_root
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 MAX_CLUSTER_NUM = 10

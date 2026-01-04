@@ -1,10 +1,8 @@
-from pathlib import Path
-
 import gradio as gr
 
 from style_bert_vits2.constants import GRADIO_THEME
 from style_bert_vits2.logging import logger
-from style_bert_vits2.tts_model import NullModelParam, TTSModelHolder
+from style_bert_vits2.tts_model import TTSModelHolder
 from style_bert_vits2.utils.subprocess import run_script_with_log
 
 
@@ -94,10 +92,9 @@ def create_onnx_app(model_holder: TTSModelHolder) -> gr.Blocks:
 
 
 if __name__ == "__main__":
-    from config import get_path_config
+    from style_bert_vits2.utils.paths import get_paths_config
 
-    path_config = get_path_config()
-    assets_root = path_config.assets_root
-    model_holder = TTSModelHolder(assets_root, "cpu", "", ignore_onnx=True)
+    paths_config = get_paths_config()
+    model_holder = TTSModelHolder(paths_config.assets_root, "cpu", "", ignore_onnx=True)
     app = create_onnx_app(model_holder)
     app.launch(inbrowser=True)

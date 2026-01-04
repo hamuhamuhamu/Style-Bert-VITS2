@@ -12,11 +12,11 @@ from numpy.typing import NDArray
 from safetensors import safe_open
 from safetensors.torch import save_file
 
-from config import get_path_config
 from style_bert_vits2.constants import DEFAULT_STYLE, GRADIO_THEME
 from style_bert_vits2.logging import logger
 from style_bert_vits2.tts_model import TTSModel, TTSModelHolder
 from style_bert_vits2.utils import torch_device_to_onnx_providers
+from style_bert_vits2.utils.paths import get_paths_config
 
 
 voice_keys = ["dec"]
@@ -25,8 +25,7 @@ speech_style_keys = ["enc_p"]
 tempo_keys = ["sdp", "dp"]
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
-path_config = get_path_config()
-assets_root = path_config.assets_root
+assets_root = get_paths_config().assets_root
 
 
 def load_safetensors(model_path: str | Path) -> dict[str, torch.Tensor]:

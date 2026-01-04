@@ -11,11 +11,10 @@ from multiprocessing import cpu_count
 from pathlib import Path
 
 import gradio as gr
-import yaml
 
-from config import get_path_config
 from style_bert_vits2.constants import GRADIO_THEME
 from style_bert_vits2.logging import logger
+from style_bert_vits2.utils.paths import get_paths_config
 from style_bert_vits2.utils.stdout_wrapper import SAFE_STDOUT
 from style_bert_vits2.utils.subprocess import run_script_with_log, second_elem_of
 
@@ -23,8 +22,7 @@ from style_bert_vits2.utils.subprocess import run_script_with_log, second_elem_o
 logger_handler = None
 tensorboard_executed = False
 
-path_config = get_path_config()
-dataset_root = path_config.dataset_root
+dataset_root = get_paths_config().dataset_root
 
 
 @dataclass
@@ -121,33 +119,18 @@ def initialize(
 
     with open(paths.config_path, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=2, ensure_ascii=False)
-    if not Path("config.yml").exists():
-        shutil.copy(src="default_config.yml", dst="config.yml")
-    with open("config.yml", encoding="utf-8") as f:
-        yml_data = yaml.safe_load(f)
-    yml_data["model_name"] = model_name
-    yml_data["dataset_path"] = str(paths.dataset_path)
-    with open("config.yml", "w", encoding="utf-8") as f:
-        yaml.dump(yml_data, f, allow_unicode=True)
     logger.success("Step 1: initialization finished.")
     return True, "Step 1, Success: 初期設定が完了しました"
 
 
 def resample(model_name: str, normalize: bool, trim: bool, num_processes: int):
     logger.info("Step 2: start resampling...")
-    dataset_path = get_path(model_name).dataset_path
-    input_dir = dataset_path / "raw"
-    output_dir = dataset_path / "wavs"
     cmd = [
         "resample.py",
-        "-i",
-        str(input_dir),
-        "-o",
-        str(output_dir),
+        "--model",
+        model_name,
         "--num_processes",
         str(num_processes),
-        "--sr",
-        "44100",
     ]
     if normalize:
         cmd.append("--normalize")
@@ -164,9 +147,7 @@ def resample(model_name: str, normalize: bool, trim: bool, num_processes: int):
     return True, "Step 2, Success: 音声ファイルの前処理が完了しました"
 
 
-def preprocess_text(
-    model_name: str, use_jp_extra: bool, val_per_lang: int, yomi_error: str
-):
+def preprocess_text(model_name: str, val_per_lang: int, yomi_error: str):
     logger.info("Step 3: start preprocessing text...")
     paths = get_path(model_name)
     if not paths.esd_path.exists():
@@ -178,22 +159,13 @@ def preprocess_text(
 
     cmd = [
         "preprocess_text.py",
-        "--config-path",
-        str(paths.config_path),
-        "--transcription-path",
-        str(paths.esd_path),
-        "--train-path",
-        str(paths.train_path),
-        "--val-path",
-        str(paths.val_path),
+        "--model",
+        model_name,
         "--val-per-lang",
         str(val_per_lang),
         "--yomi_error",
         yomi_error,
-        "--correct_path",  # 音声ファイルのパスを正しいパスに修正する
     ]
-    if use_jp_extra:
-        cmd.append("--use_jp_extra")
     success, message = run_script_with_log(cmd)
     if not success:
         logger.error("Step 3: preprocessing text failed.")
@@ -213,10 +185,7 @@ def preprocess_text(
 
 def bert_gen(model_name: str):
     logger.info("Step 4: start bert_gen...")
-    config_path = get_path(model_name).config_path
-    success, message = run_script_with_log(
-        ["bert_gen.py", "--config", str(config_path)]
-    )
+    success, message = run_script_with_log(["bert_gen.py", "--model", model_name])
     if not success:
         logger.error("Step 4: bert_gen failed.")
         return False, f"Step 4, Error: BERT特徴ファイルの生成に失敗しました:\n{message}"
@@ -232,12 +201,11 @@ def bert_gen(model_name: str):
 
 def style_gen(model_name: str, num_processes: int):
     logger.info("Step 5: start style_gen...")
-    config_path = get_path(model_name).config_path
     success, message = run_script_with_log(
         [
             "style_gen.py",
-            "--config",
-            str(config_path),
+            "--model",
+            model_name,
             "--num_processes",
             str(num_processes),
         ]
@@ -304,7 +272,6 @@ def preprocess_all(
 
     success, message = preprocess_text(
         model_name=model_name,
-        use_jp_extra=use_jp_extra,
         val_per_lang=val_per_lang,
         yomi_error=yomi_error,
     )
@@ -332,22 +299,12 @@ def train(
     speedup: bool = False,
     not_use_custom_batch_sampler: bool = False,
 ):
-    paths = get_path(model_name)
-    # 学習再開の場合を考えて念のためconfig.ymlの名前等を更新
-    with open("config.yml", encoding="utf-8") as f:
-        yml_data = yaml.safe_load(f)
-    yml_data["model_name"] = model_name
-    yml_data["dataset_path"] = str(paths.dataset_path)
-    with open("config.yml", "w", encoding="utf-8") as f:
-        yaml.dump(yml_data, f, allow_unicode=True)
-
+    # use_jp_extra は config.json に保存されているが、UI での選択に基づいてスクリプトを選ぶ
     train_py = "train_ms.py" if not use_jp_extra else "train_ms_jp_extra.py"
     cmd = [
         train_py,
-        "--config",
-        str(paths.config_path),
         "--model",
-        str(paths.dataset_path),
+        model_name,
     ]
     if skip_style:
         cmd.append("--skip_default_style")
@@ -385,12 +342,13 @@ def run_tensorboard(model_name: str):
     global tensorboard_executed
     if not tensorboard_executed:
         python = sys.executable
+        log_dir = dataset_root / model_name / "models"
         tensorboard_cmd = [
             python,
             "-m",
             "tensorboard.main",
             "--logdir",
-            f"Data/{model_name}/models",
+            str(log_dir),
         ]
         subprocess.Popen(
             tensorboard_cmd,
