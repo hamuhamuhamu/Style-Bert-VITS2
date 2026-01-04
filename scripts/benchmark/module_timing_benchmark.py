@@ -18,7 +18,6 @@ import numpy as np
 import torch
 
 from style_bert_vits2.constants import (
-    BASE_DIR,
     DEFAULT_LENGTH,
     DEFAULT_NOISE,
     DEFAULT_NOISEW,
@@ -33,6 +32,7 @@ from style_bert_vits2.models.models_jp_extra import (
 )
 from style_bert_vits2.nlp import bert_models
 from style_bert_vits2.tts_model import TTSModel, TTSModelHolder
+from style_bert_vits2.utils.paths import get_paths_config
 
 from ..utils import set_random_seeds
 
@@ -276,7 +276,7 @@ def run_benchmark(
 
     # モデルホルダーを初期化
     model_holder = TTSModelHolder(
-        BASE_DIR / "model_assets",
+        get_paths_config().assets_root,
         device,
         onnx_providers=[],
         ignore_onnx=True,

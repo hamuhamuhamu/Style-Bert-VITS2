@@ -15,6 +15,7 @@ from numpy.typing import NDArray
 
 from style_bert_vits2.logging import logger
 from style_bert_vits2.models.utils import load_filepaths_and_text
+from style_bert_vits2.utils.paths import TrainingModelPaths, add_model_argument
 
 
 DEFAULT_TARGET_CLUSTER_SIZE = 20
@@ -42,7 +43,7 @@ def _parse_args() -> argparse.Namespace:
     """
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset_dir", type=str, required=True)
+    add_model_argument(parser)
     parser.add_argument(
         "--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu"
     )
@@ -623,7 +624,9 @@ def main() -> None:
     """
 
     args = _parse_args()
-    dataset_dir = Path(args.dataset_dir)
+    model_folder_name: str = args.model
+    paths = TrainingModelPaths(model_folder_name)
+    dataset_dir = paths.dataset_dir
     list_entries_map = _load_all_list_entries(dataset_dir)
     all_entries: list[list[str]] = []
     for entries in list_entries_map.values():

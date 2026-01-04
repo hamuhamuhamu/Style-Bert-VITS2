@@ -13,16 +13,18 @@ import argparse
 import random
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import numpy as np
 import torch
 from numpy.typing import NDArray
 
-from style_bert_vits2.constants import BASE_DIR, Languages
+from style_bert_vits2.constants import Languages
 from style_bert_vits2.logging import logger
 from style_bert_vits2.models import attentions, models, models_jp_extra
 from style_bert_vits2.tts_model import TTSModel, TTSModelHolder
+from style_bert_vits2.utils.paths import get_paths_config
 
 
 SEED_BASELINE = 1234
@@ -65,14 +67,14 @@ def set_global_seed(seed: int) -> None:
 
 
 def select_target_model(
-    model_root_dir: str,
+    model_root_dir: Path,
     model_name: str | None,
     device: str,
 ) -> tuple[TTSModelHolder, TTSModel]:
     """検証に使用する TTSModel を選択しロードする。
 
     Args:
-        model_root_dir (str): モデル資産が格納されているディレクトリパス
+        model_root_dir (Path): モデル資産が格納されているディレクトリパス
         model_name (str | None): 使用したいモデル名。None の場合は JP-Extra モデルの先頭を選択
         device (str): 使用するデバイス (例: \"cuda:0\")
 
@@ -81,7 +83,7 @@ def select_target_model(
     """
 
     holder = TTSModelHolder(
-        BASE_DIR / model_root_dir,
+        model_root_dir,
         device=device,
         onnx_providers=[
             (
@@ -94,7 +96,7 @@ def select_target_model(
         use_fp16=True,
     )
     if len(holder.models_info) == 0:
-        raise RuntimeError("No models found under model_assets directory.")
+        raise RuntimeError(f"No models found under {model_root_dir}.")
 
     if model_name is None:
         # JP-Extra モデルを優先して選択
@@ -117,7 +119,7 @@ def select_target_model(
                 target_info = info
                 break
         if target_info is None:
-            raise ValueError(f"Model `{model_name}` is not found in model_assets.")
+            raise ValueError(f"Model `{model_name}` is not found in {model_root_dir}.")
 
     model_files = holder.model_files_dict[target_info.name]
     if len(model_files) == 0:
@@ -635,7 +637,7 @@ def parse_args() -> argparse.Namespace:
         "--model-name",
         type=str,
         default=None,
-        help="Target model name under model_assets. If omitted, the first JP-Extra model is used.",
+        help="Target model name under assets_root. If omitted, the first JP-Extra model is used.",
     )
     parser.add_argument(
         "--num-runs",
@@ -665,9 +667,10 @@ def main() -> None:
     """メインエントリポイント。指定された条件で各実験を実行する。"""
 
     args = parse_args()
+    paths_config = get_paths_config()
 
     holder, model = select_target_model(
-        model_root_dir="model_assets",
+        model_root_dir=paths_config.assets_root,
         model_name=args.model_name,
         device=args.device,
     )

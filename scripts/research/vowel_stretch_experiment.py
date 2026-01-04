@@ -20,7 +20,7 @@ import numpy as np
 import torch
 from numpy.typing import NDArray
 
-from style_bert_vits2.constants import BASE_DIR, Languages
+from style_bert_vits2.constants import Languages
 from style_bert_vits2.logging import logger
 from style_bert_vits2.models import commons
 from style_bert_vits2.models.infer import prepare_inference_data
@@ -30,6 +30,7 @@ from style_bert_vits2.models.models_jp_extra import (
 from style_bert_vits2.nlp.japanese.mora_list import VOWELS
 from style_bert_vits2.nlp.symbols import SYMBOLS
 from style_bert_vits2.tts_model import TTSModel, TTSModelHolder
+from style_bert_vits2.utils.paths import get_paths_config
 
 
 def _decode_symbols(token_ids: list[int]) -> list[str]:
@@ -270,7 +271,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--models",
         type=str,
         default="koharune-ami",
-        help="Comma-separated model names under model_assets.",
+        help="Comma-separated model names under assets_root.",
     )
     parser.add_argument(
         "--style",
@@ -347,18 +348,19 @@ def main() -> None:
     if len(model_names) == 0:
         raise ValueError("No model names provided")
 
+    assets_root = get_paths_config().assets_root
     model_holder = TTSModelHolder(
-        BASE_DIR / "model_assets",
+        assets_root,
         device=args.device,
         onnx_providers=[],
         ignore_onnx=True,
         use_fp16=False,
     )
     if len(model_holder.models_info) == 0:
-        raise RuntimeError("No models found under model_assets")
+        raise RuntimeError(f"No models found under {assets_root}")
 
     language = Languages(args.language)
-    output_dir = BASE_DIR / "scripts" / "research" / "vowel_stretch_experiment"
+    output_dir = Path(__file__).resolve().parent / "vowel_stretch_experiment"
     text_tag = _safe_filename(args.text)
 
     logger.info("Starting vowel stretch experiment")

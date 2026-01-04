@@ -9,6 +9,20 @@ VERSION = "2.7.0"
 # Style-Bert-VITS2 のベースディレクトリ
 BASE_DIR = Path(__file__).parent.parent
 
+# デフォルトの学習用データセットのルートディレクトリ
+## {model_folder_name} の学習データは {DATASET_ROOT}/{model_folder_name}/ に配置する
+DEFAULT_DATASET_ROOT = BASE_DIR / "Data"
+
+# デフォルトの推論用モデルアセットのルートディレクトリ
+## 学習時は {ASSETS_ROOT}/{model_folder_name}/ にモデルが保存され、
+## 推論時は {ASSETS_ROOT} 以下の全モデルを読み込む
+DEFAULT_ASSETS_ROOT = BASE_DIR / "model_assets"
+
+# デフォルトのパス設定ファイルのパス
+DEFAULT_PATHS_CONFIG_PATH = BASE_DIR / "configs/paths.yml"
+# デフォルトのパス設定ファイルのテンプレートのパス
+DEFAULT_PATHS_TEMPLATE_PATH = BASE_DIR / "configs/default_paths.yml"
+
 
 # 利用可能な言語
 ## JP-Extra モデル利用時は JP 以外の言語の音声合成はできない
@@ -47,7 +61,15 @@ DEFAULT_LENGTH = 1.0
 DEFAULT_LINE_SPLIT = True
 DEFAULT_SPLIT_INTERVAL = 0.5
 DEFAULT_ASSIST_TEXT_WEIGHT = 0.7
-DEFAULT_ASSIST_TEXT_WEIGHT = 1.0
+
+# 分散学習用環境変数
+DEFAULT_TRAIN_ENV: dict[str, str] = {
+    "MASTER_ADDR": "localhost",
+    "MASTER_PORT": "10086",
+    "WORLD_SIZE": "1",
+    "LOCAL_RANK": "0",
+    "RANK": "0",
+}
 
 # Gradio のテーマ
 ## Built-in theme: "default", "base", "monochrome", "soft", "glass"

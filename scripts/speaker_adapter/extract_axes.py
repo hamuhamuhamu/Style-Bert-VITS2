@@ -15,6 +15,7 @@ import pyworld
 from numpy.typing import NDArray
 
 from style_bert_vits2.models.hyper_parameters import HyperParameters
+from style_bert_vits2.utils.paths import TrainingModelPaths, add_model_argument
 
 
 def _parse_args() -> argparse.Namespace:
@@ -26,7 +27,7 @@ def _parse_args() -> argparse.Namespace:
     """
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, required=True)
+    add_model_argument(parser)
     parser.add_argument("--g_npz", type=str, required=True)
     parser.add_argument("--meta_jsonl", type=str, required=True)
     parser.add_argument("--output_dir", type=str, required=True)
@@ -175,7 +176,9 @@ def main() -> None:
     """
 
     args = _parse_args()
-    config_path = Path(args.config)
+    model_folder_name: str = args.model
+    paths = TrainingModelPaths(model_folder_name)
+    config_path = paths.config_path
     g_npz = Path(args.g_npz)
     meta_jsonl = Path(args.meta_jsonl)
     output_dir = Path(args.output_dir)

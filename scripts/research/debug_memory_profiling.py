@@ -41,6 +41,7 @@ from style_bert_vits2.nlp import (
     extract_bert_feature,
 )
 from style_bert_vits2.tts_model import TTSModel, TTSModelHolder
+from style_bert_vits2.utils.paths import get_paths_config
 
 from ..utils import set_random_seeds
 
@@ -491,7 +492,7 @@ def run_comprehensive_profiling(
     logger.info("Phase 2: TTSモデル準備")
 
     model_holder = TTSModelHolder(
-        BASE_DIR / "model_assets",
+        get_paths_config().assets_root,
         device,
         onnx_providers=[],
         ignore_onnx=True,

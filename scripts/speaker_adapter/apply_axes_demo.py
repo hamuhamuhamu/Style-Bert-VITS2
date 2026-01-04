@@ -14,6 +14,7 @@ from scipy.io.wavfile import write as wav_write
 
 from style_bert_vits2.constants import Languages
 from style_bert_vits2.tts_model import TTSModel
+from style_bert_vits2.utils.paths import get_paths_config
 
 
 def _parse_args() -> argparse.Namespace:
@@ -25,9 +26,19 @@ def _parse_args() -> argparse.Namespace:
     """
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", type=str, required=True)
-    parser.add_argument("--config", type=str, required=True)
-    parser.add_argument("--style_vec", type=str, required=True)
+    parser.add_argument(
+        "--model",
+        "-m",
+        type=str,
+        required=True,
+        help="Model folder name in model_assets/",
+    )
+    parser.add_argument(
+        "--checkpoint",
+        type=str,
+        required=True,
+        help="Checkpoint filename (relative to model_assets/{model-name}/)",
+    )
     parser.add_argument("--text", type=str, required=True)
     parser.add_argument("--external_embedding", type=str, required=True)
     parser.add_argument("--axes_npz", type=str, required=True)
@@ -71,13 +82,25 @@ def main() -> None:
     """
 
     args = _parse_args()
-    model_path = Path(args.model)
-    config_path = Path(args.config)
-    style_vec_path = Path(args.style_vec)
+    model_name: str = args.model
+    model_dir = get_paths_config().assets_root / model_name
+    model_path = model_dir / args.checkpoint
+    config_path = model_dir / "config.json"
+    style_vec_path = model_dir / "style_vectors.npy"
     output_dir = Path(args.output_dir)
+    external_embedding_path = Path(args.external_embedding)
+
+    for required_path in (
+        model_path,
+        config_path,
+        style_vec_path,
+        external_embedding_path,
+    ):
+        if not required_path.exists():
+            raise FileNotFoundError(f"Required file not found: {required_path}")
 
     axis = _load_axis(Path(args.axes_npz), Path(args.axes_json), args.axis_name)
-    external_embedding = np.load(args.external_embedding)
+    external_embedding = np.load(external_embedding_path)
 
     tts_model = TTSModel(
         model_path=model_path,

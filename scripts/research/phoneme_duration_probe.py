@@ -34,6 +34,7 @@ from style_bert_vits2.models.models_jp_extra import (
 )
 from style_bert_vits2.nlp.symbols import PUNCTUATIONS, SYMBOLS
 from style_bert_vits2.tts_model import TTSModelHolder
+from style_bert_vits2.utils.paths import get_paths_config
 
 
 def _percentiles(
@@ -200,7 +201,7 @@ def main() -> None:
 
     # モデルホルダーを初期化
     model_holder = TTSModelHolder(
-        BASE_DIR / "model_assets",
+        get_paths_config().assets_root,
         device=args.device,
         onnx_providers=[],
         ignore_onnx=True,

@@ -29,6 +29,7 @@ from style_bert_vits2.models.tensor_padding import (
 )
 from style_bert_vits2.nlp import bert_models
 from style_bert_vits2.tts_model import TTSModel, TTSModelHolder
+from style_bert_vits2.utils.paths import get_paths_config
 
 from ..utils import save_benchmark_audio, set_random_seeds
 
@@ -270,7 +271,7 @@ def run_benchmark(
 
     # モデルホルダーを初期化
     model_holder = TTSModelHolder(
-        BASE_DIR / "model_assets",
+        get_paths_config().assets_root,
         device,
         onnx_providers=[],
         ignore_onnx=True,

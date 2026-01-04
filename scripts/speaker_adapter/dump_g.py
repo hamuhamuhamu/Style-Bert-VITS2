@@ -19,6 +19,7 @@ from style_bert_vits2.models.models_nanairo import (
     SynthesizerTrn as SynthesizerTrnNanairo,
 )
 from style_bert_vits2.models.utils import load_filepaths_and_text
+from style_bert_vits2.utils.paths import TrainingModelPaths, add_model_argument
 
 
 def _parse_args() -> argparse.Namespace:
@@ -30,9 +31,13 @@ def _parse_args() -> argparse.Namespace:
     """
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, required=True)
-    parser.add_argument("--model", type=str, required=True)
-    parser.add_argument("--list", type=str, required=True)
+    add_model_argument(parser)
+    parser.add_argument(
+        "--checkpoint",
+        type=str,
+        required=True,
+        help="Checkpoint filename (relative to Data/{model-name}/)",
+    )
     parser.add_argument("--output_npz", type=str, required=True)
     parser.add_argument("--output_meta", type=str, required=True)
     parser.add_argument(
@@ -88,9 +93,11 @@ def main() -> None:
     """
 
     args = _parse_args()
-    config_path = Path(args.config)
-    model_path = Path(args.model)
-    list_path = Path(args.list)
+    model_folder_name: str = args.model
+    paths = TrainingModelPaths(model_folder_name)
+    config_path = paths.config_path
+    model_path = paths.models_dir / args.checkpoint
+    list_path = paths.train_list_path
     output_npz = Path(args.output_npz)
     output_meta = Path(args.output_meta)
 
