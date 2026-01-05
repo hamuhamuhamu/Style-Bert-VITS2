@@ -107,8 +107,11 @@ def process_line(
         if "/wavs/" in utt_posix:
             # Data/model_name/wavs/file.wav 形式の場合、wavs/ 以降を取得
             normalized_utt_path = Path(utt_posix.split("/wavs/", 1)[1])
+        elif utt_posix.startswith("wavs/"):
+            # wavs/file.wav 形式の場合、wavs/ プレフィックスを除去
+            normalized_utt_path = Path(utt_posix[5:])  # "wavs/" は 5 文字
         else:
-            # 既に相対パスの場合はそのまま使用
+            # 既に wavs/ からの相対パスの場合はそのまま使用
             normalized_utt_path = utt_path
     # スラッシュ区切りの文字列に変換
     # Windows/Unix に関わらずスラッシュで統一
@@ -199,6 +202,8 @@ def preprocess(
     current_sid: int = 0
 
     # 音源ファイルのチェックや、spk_id_map の作成
+    # utt は process_line() で wavs_dir からの相対パスに正規化されているため、
+    # ファイルの存在チェックは wavs_dir を基準に行う
     with transcription_path.open("r", encoding="utf-8") as f:
         audio_paths: set[str] = set()
         count_same = 0
@@ -209,8 +214,10 @@ def preprocess(
                 logger.warning(f"Same audio file appears multiple times: {utt}")
                 count_same += 1
                 continue
-            if not Path(utt).is_file():
-                logger.warning(f"Audio not found: {utt}")
+            # utt は wavs_dir からの相対パスなので、フルパスを構築してチェック
+            audio_full_path = wavs_dir / utt
+            if not audio_full_path.is_file():
+                logger.warning(f"Audio not found: {utt} (checked: {audio_full_path})")
                 count_not_found += 1
                 continue
             audio_paths.add(utt)
