@@ -31,10 +31,12 @@ import os
 import platform
 from contextlib import nullcontext
 from pathlib import Path
+from typing import Any
 
 import torch
 import torch.distributed as dist
 from huggingface_hub import HfApi
+from loguru import Logger as LoguruLogger
 from torch.amp import GradScaler, autocast
 from torch.nn import functional as F
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -472,6 +474,7 @@ def run():
             param.requires_grad = False
         if getattr(net_g, "ext_spk_adapter", None) is None:
             raise ValueError("External speaker adapter is not initialized.")
+        assert net_g.ext_spk_adapter is not None
         for param in net_g.ext_spk_adapter.parameters():
             param.requires_grad = True
 
@@ -542,11 +545,13 @@ def run():
                     optim_dur_disc,
                     skip_optimizer=hps.train.skip_optimizer,
                 )
+                assert optim_dur_disc is not None
                 if not optim_dur_disc.param_groups[0].get("initial_lr"):
                     optim_dur_disc.param_groups[0]["initial_lr"] = dur_resume_lr
             except Exception as ex:
                 # チェックポイントのロードに失敗した場合、デフォルト学習率で初期化
                 logger.warning(f"Failed to load DUR checkpoint: {ex}")
+                assert optim_dur_disc is not None
                 if not optim_dur_disc.param_groups[0].get("initial_lr"):
                     optim_dur_disc.param_groups[0]["initial_lr"] = dur_resume_lr
                 logger.info("Initialize dur_disc with default learning rate")
@@ -564,11 +569,13 @@ def run():
                         skip_optimizer=hps.train.skip_optimizer,
                     )
                 )
+                assert optim_wd is not None
                 if not optim_wd.param_groups[0].get("initial_lr"):
                     optim_wd.param_groups[0]["initial_lr"] = wd_resume_lr
             except Exception as ex:
                 # チェックポイントのロードに失敗した場合、デフォルト学習率で初期化
                 logger.warning(f"Failed to load WD checkpoint: {ex}")
+                assert optim_wd is not None
                 if not optim_wd.param_groups[0].get("initial_lr"):
                     optim_wd.param_groups[0]["initial_lr"] = wd_resume_lr
                 logger.info("Initialize wavlm with default learning rate")
@@ -593,11 +600,12 @@ def run():
 
             epoch_str = max(epoch_str, 1)
             # global_step = (epoch_str - 1) * len(train_loader)
-            global_step = int(
-                get_steps(
-                    utils.checkpoints.get_latest_checkpoint_path(model_dir, "G_*.pth")
-                )
+            steps = get_steps(
+                utils.checkpoints.get_latest_checkpoint_path(model_dir, "G_*.pth")
             )
+            if steps is None:
+                raise ValueError("Failed to parse global step from checkpoint path.")
+            global_step = steps
             logger.info(
                 f"******************Found the model. Current epoch is {epoch_str}, global step is {global_step}*********************"
             )
@@ -635,7 +643,7 @@ def run():
             epoch_str = 1
             global_step = 0
 
-    def lr_lambda(epoch):
+    def lr_lambda(epoch: int) -> float:
         """
         Learning rate scheduler for warmup and exponential decay.
         - During the warmup period, the learning rate increases linearly.
@@ -644,7 +652,7 @@ def run():
         if epoch < hps.train.warmup_epochs:
             return float(epoch) / float(max(1, hps.train.warmup_epochs))
         else:
-            return hps.train.lr_decay ** (epoch - hps.train.warmup_epochs)
+            return float(hps.train.lr_decay) ** (epoch - hps.train.warmup_epochs)
 
     scheduler_last_epoch = epoch_str - 2
     scheduler_g = torch.optim.lr_scheduler.LambdaLR(
@@ -654,12 +662,16 @@ def run():
         optim_d, lr_lambda=lr_lambda, last_epoch=scheduler_last_epoch
     )
     if net_dur_disc is not None:
+        assert optim_dur_disc is not None
         scheduler_dur_disc = torch.optim.lr_scheduler.LambdaLR(
-            optim_dur_disc, lr_lambda=lr_lambda, last_epoch=scheduler_last_epoch
+            optim_dur_disc,
+            lr_lambda=lr_lambda,
+            last_epoch=scheduler_last_epoch,
         )
     else:
         scheduler_dur_disc = None
     if net_wd is not None:
+        assert optim_wd is not None
         scheduler_wd = torch.optim.lr_scheduler.LambdaLR(
             optim_wd, lr_lambda=lr_lambda, last_epoch=scheduler_last_epoch
         )
@@ -682,7 +694,7 @@ def run():
     diff = abs(
         epoch_str * len(train_loader) - (hps.train.epochs + 1) * len(train_loader)
     )
-    pbar = None
+    pbar: tqdm[Any] | None = None
     if not args.no_progress_bar:
         pbar = tqdm(
             total=global_step + diff,
@@ -745,6 +757,11 @@ def run():
             f"Effective batch size: {hps.train.batch_size} x {args.gradient_accumulation_steps} = {effective_batch_size}"
         )
 
+    writers = (
+        (writer, writer_eval)
+        if writer is not None and writer_eval is not None
+        else None
+    )
     for epoch in range(epoch_str, hps.train.epochs + 1):
         if rank == 0:
             train_and_evaluate(
@@ -753,13 +770,13 @@ def run():
                 epoch,
                 hps,
                 runtime_config,
-                [net_g, net_d, net_dur_disc, net_wd, wl],
-                [optim_g, optim_d, optim_dur_disc, optim_wd],
-                [scheduler_g, scheduler_d, scheduler_dur_disc, scheduler_wd],
+                (net_g, net_d, net_dur_disc, net_wd, wl),
+                (optim_g, optim_d, optim_dur_disc, optim_wd),
+                (scheduler_g, scheduler_d, scheduler_dur_disc, scheduler_wd),
                 scaler,
-                [train_loader, eval_loader],
+                (train_loader, eval_loader),
                 logger,
-                [writer, writer_eval],
+                writers,
                 pbar,
                 initial_step,
                 args.gradient_accumulation_steps,
@@ -771,11 +788,11 @@ def run():
                 epoch,
                 hps,
                 runtime_config,
-                [net_g, net_d, net_dur_disc, net_wd, wl],
-                [optim_g, optim_d, optim_dur_disc, optim_wd],
-                [scheduler_g, scheduler_d, scheduler_dur_disc, scheduler_wd],
+                (net_g, net_d, net_dur_disc, net_wd, wl),
+                (optim_g, optim_d, optim_dur_disc, optim_wd),
+                (scheduler_g, scheduler_d, scheduler_dur_disc, scheduler_wd),
                 scaler,
-                [train_loader, None],
+                (train_loader, None),
                 None,
                 None,
                 pbar,
@@ -785,8 +802,10 @@ def run():
         scheduler_g.step()
         scheduler_d.step()
         if net_dur_disc is not None:
+            assert scheduler_dur_disc is not None
             scheduler_dur_disc.step()
         if net_wd is not None:
+            assert scheduler_wd is not None
             scheduler_wd.step()
 
         if epoch == hps.train.epochs:
@@ -864,19 +883,29 @@ def run():
 
 
 def train_and_evaluate(
-    rank,
-    local_rank,
-    epoch,
+    rank: int,
+    local_rank: int,
+    epoch: int,
     hps: HyperParameters,
     runtime_config: TrainRuntimeConfig,
-    nets,
-    optims,
-    schedulers,
-    scaler,
-    loaders,
-    logger,
-    writers,
-    pbar: tqdm,
+    nets: tuple[DDP, DDP, DDP | None, DDP | None, Any | None],
+    optims: tuple[
+        torch.optim.Optimizer,
+        torch.optim.Optimizer,
+        torch.optim.Optimizer | None,
+        torch.optim.Optimizer | None,
+    ],
+    schedulers: tuple[
+        torch.optim.lr_scheduler.LambdaLR,
+        torch.optim.lr_scheduler.LambdaLR,
+        torch.optim.lr_scheduler.LambdaLR | None,
+        torch.optim.lr_scheduler.LambdaLR | None,
+    ],
+    scaler: GradScaler,
+    loaders: tuple[DataLoader[Any], DataLoader[Any] | None],
+    logger: LoguruLogger | None,
+    writers: tuple[SummaryWriter, SummaryWriter] | None,
+    pbar: tqdm[Any] | None,
     initial_step: int,
     gradient_accumulation_steps: int = 1,
 ):
@@ -884,6 +913,8 @@ def train_and_evaluate(
     optim_g, optim_d, optim_dur_disc, optim_wd = optims
     scheduler_g, scheduler_d, scheduler_dur_disc, scheduler_wd = schedulers
     train_loader, eval_loader = loaders
+    writer: SummaryWriter | None = None
+    writer_eval: SummaryWriter | None = None
     if writers is not None:
         writer, writer_eval = writers
 
@@ -1038,6 +1069,15 @@ def train_and_evaluate(
         is_last_accumulation_step = ((batch_idx + 1) % gradient_accumulation_steps) == 0
         should_step = is_last_accumulation_step or not is_accumulating
 
+        loss_dur_disc_all: torch.Tensor | None = None
+        losses_dur_disc_r: list[float] | None = None
+        losses_dur_disc_g: list[float] | None = None
+        loss_slm: torch.Tensor | None = None
+        loss_lm: torch.Tensor | None = None
+        loss_lm_gen: torch.Tensor | None = None
+        loss_dur_gen: torch.Tensor | None = None
+        losses_dur_gen: list[torch.Tensor] | None = None
+
         # Discriminator
         if disable_discriminators:
             loss_disc = torch.tensor(0.0, device=y.device)
@@ -1051,8 +1091,10 @@ def train_and_evaluate(
             if is_first_accumulation_step:
                 optim_d.zero_grad()
                 if net_dur_disc is not None:
+                    assert optim_dur_disc is not None
                     optim_dur_disc.zero_grad()
                 if net_wd is not None:
+                    assert optim_wd is not None
                     optim_wd.zero_grad()
             y_d_hat_r, y_d_hat_g, _, _ = net_d(y, y_hat.detach())
             with autocast(
@@ -1092,6 +1134,7 @@ def train_and_evaluate(
                     enabled=hps.train.bf16_run,
                     dtype=torch.bfloat16,
                 ):
+                    assert wl is not None
                     loss_slm = wl.discriminator(
                         y.detach().squeeze(1), y_hat.detach().squeeze(1)
                     ).mean()
@@ -1110,6 +1153,7 @@ def train_and_evaluate(
                 scaler.scale(loss_disc_scaled).backward()
 
             if net_dur_disc is not None:
+                assert loss_dur_disc_all is not None
                 loss_dur_disc_scaled = (
                     loss_dur_disc_all / gradient_accumulation_steps
                     if is_accumulating
@@ -1128,6 +1172,7 @@ def train_and_evaluate(
                     scaler.scale(loss_dur_disc_scaled).backward()
 
             if net_wd is not None:
+                assert loss_slm is not None
                 loss_slm_scaled = (
                     loss_slm / gradient_accumulation_steps
                     if is_accumulating
@@ -1156,6 +1201,7 @@ def train_and_evaluate(
                 scaler.step(optim_d)
 
                 if net_dur_disc is not None:
+                    assert optim_dur_disc is not None
                     scaler.unscale_(optim_dur_disc)
                     # torch.nn.utils.clip_grad_norm_(
                     # parameters=net_dur_disc.parameters(), max_norm=5
@@ -1166,6 +1212,7 @@ def train_and_evaluate(
                     scaler.step(optim_dur_disc)
 
                 if net_wd is not None:
+                    assert optim_wd is not None
                     scaler.unscale_(optim_wd)
                     grad_norm_wd = commons.clip_grad_value_(net_wd.parameters(), None)
                     scaler.step(optim_wd)
@@ -1176,6 +1223,7 @@ def train_and_evaluate(
             dtype=torch.bfloat16,
         ):
             # Generator
+            y_dur_hat_g_gen: list[torch.Tensor] | None = None
             if disable_discriminators:
                 loss_fm = torch.tensor(0.0, device=y.device)
                 loss_gen = torch.tensor(0.0, device=y.device)
@@ -1183,8 +1231,9 @@ def train_and_evaluate(
             else:
                 y_d_hat_r, y_d_hat_g, fmap_r, fmap_g = net_d(y, y_hat)
                 if net_dur_disc is not None:
-                    _, y_dur_hat_g = net_dur_disc(hidden_x, x_mask, logw_, logw, g)
+                    _, y_dur_hat_g_gen = net_dur_disc(hidden_x, x_mask, logw_, logw, g)
                 if net_wd is not None:
+                    assert wl is not None
                     loss_lm = wl(y.detach().squeeze(1), y_hat.squeeze(1)).mean()
                     loss_lm_gen = wl.generator(y_hat.squeeze(1))
                 with autocast(
@@ -1211,7 +1260,8 @@ def train_and_evaluate(
 
                 # Duration Discriminator の損失を追加
                 if net_dur_disc is not None and not disable_discriminators:
-                    loss_dur_gen, losses_dur_gen = generator_loss(y_dur_hat_g)
+                    assert y_dur_hat_g_gen is not None
+                    loss_dur_gen, losses_dur_gen = generator_loss(y_dur_hat_g_gen)
                     loss_gen_all += loss_dur_gen
 
                 # ======================================================================
@@ -1227,6 +1277,8 @@ def train_and_evaluate(
                 # ======================================================================
                 # WavLM Discriminator の損失を追加 (Duration Discriminator の有無に関係なく)
                 if net_wd is not None and not disable_discriminators:
+                    assert loss_lm is not None
+                    assert loss_lm_gen is not None
                     loss_gen_all += loss_lm + loss_lm_gen
 
         if is_first_accumulation_step:
@@ -1303,6 +1355,12 @@ def train_and_evaluate(
                 )
 
                 if net_dur_disc is not None and not disable_discriminators:
+                    assert loss_dur_disc_all is not None
+                    assert losses_dur_disc_g is not None
+                    assert losses_dur_disc_r is not None
+                    assert loss_dur_gen is not None
+                    assert losses_dur_gen is not None
+
                     scalar_dict.update({"loss/dur_disc/total": loss_dur_disc_all})
 
                     scalar_dict.update(
@@ -1326,6 +1384,9 @@ def train_and_evaluate(
                 # NOTE: 現在のコードでは、ここでログに記録される損失は実際に loss_gen_all に加算されて学習に使用されるようになっている
                 ## 修正前は loss_lm, loss_lm_gen がログには表示されるが学習には使われない状態だった
                 if net_wd is not None and not disable_discriminators:
+                    assert loss_slm is not None
+                    assert loss_lm is not None
+                    assert loss_lm_gen is not None
                     scalar_dict.update(
                         {
                             "loss/wd/total": loss_slm,
@@ -1349,6 +1410,7 @@ def train_and_evaluate(
                 #         attn[0, 0].data.cpu().numpy()
                 #     ),
                 # }
+                assert writer is not None
                 summarize(
                     writer=writer,
                     global_step=global_step,
@@ -1362,6 +1424,8 @@ def train_and_evaluate(
                 and initial_step != global_step
             ):
                 if not runtime_config.speedup:
+                    assert eval_loader is not None
+                    assert writer_eval is not None
                     evaluate(hps, net_g, eval_loader, writer_eval)
                 assert runtime_config.model_dir is not None
                 utils.checkpoints.save_checkpoint(
@@ -1379,6 +1443,7 @@ def train_and_evaluate(
                     os.path.join(runtime_config.model_dir, f"D_{global_step}.pth"),
                 )
                 if net_dur_disc is not None:
+                    assert optim_dur_disc is not None
                     utils.checkpoints.save_checkpoint(
                         net_dur_disc,
                         optim_dur_disc,
@@ -1389,6 +1454,7 @@ def train_and_evaluate(
                         ),
                     )
                 if net_wd is not None:
+                    assert optim_wd is not None
                     utils.checkpoints.save_checkpoint(
                         net_wd,
                         optim_wd,
@@ -1454,10 +1520,16 @@ def train_and_evaluate(
     gc.collect()
     torch.cuda.empty_cache()
     if pbar is None and rank == 0:
+        assert logger is not None
         logger.info(f"====> Epoch: {epoch}, step: {global_step}")
 
 
-def evaluate(hps, generator, eval_loader, writer_eval):
+def evaluate(
+    hps: HyperParameters,
+    generator: DDP,
+    eval_loader: DataLoader[Any],
+    writer_eval: SummaryWriter,
+) -> None:
     generator.eval()
     image_dict = {}
     audio_dict = {}

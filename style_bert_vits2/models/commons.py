@@ -3,6 +3,7 @@
 コードと完全に一致している保証はない。あくまで参考程度とすること。
 """
 
+from collections.abc import Iterable
 from typing import Any
 
 import torch
@@ -275,7 +276,7 @@ def generate_path(duration: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
 
 
 def clip_grad_value_(
-    parameters: torch.Tensor | list[torch.Tensor],
+    parameters: torch.Tensor | Iterable[torch.Tensor],
     clip_value: float | None,
     norm_type: float = 2.0,
 ) -> float:
@@ -283,7 +284,7 @@ def clip_grad_value_(
     勾配の値をクリップする
 
     Args:
-        parameters (torch.Tensor | list[torch.Tensor]): クリップするパラメータ
+        parameters (torch.Tensor | Iterable[torch.Tensor]): クリップするパラメータ
         clip_value (float | None): クリップする値。None の場合はクリップしない
         norm_type (float): ノルムの種類
 
@@ -291,14 +292,16 @@ def clip_grad_value_(
         float: 総ノルム
     """
     if isinstance(parameters, torch.Tensor):
-        parameters = [parameters]
-    parameters = list(filter(lambda p: p.grad is not None, parameters))
+        parameters_list = [parameters]
+    else:
+        parameters_list = list(parameters)
+    parameters_list = list(filter(lambda p: p.grad is not None, parameters_list))
     norm_type = float(norm_type)
     if clip_value is not None:
         clip_value = float(clip_value)
 
     total_norm = 0.0
-    for p in parameters:
+    for p in parameters_list:
         assert p.grad is not None
         param_norm = p.grad.data.norm(norm_type)
         total_norm += param_norm.item() ** norm_type

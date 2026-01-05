@@ -29,7 +29,7 @@ __is_matplotlib_imported = False
 def summarize(
     writer: "SummaryWriter",
     global_step: int,
-    scalars: dict[str, float] = {},
+    scalars: dict[str, float | torch.Tensor] = {},
     histograms: dict[str, Any] = {},
     images: dict[str, Any] = {},
     audios: dict[str, Any] = {},
@@ -41,7 +41,7 @@ def summarize(
     Args:
         writer (SummaryWriter): TensorBoard への書き込みを行うオブジェクト
         global_step (int): グローバルステップ数
-        scalars (dict[str, float]): スカラー値の辞書
+        scalars (dict[str, float | torch.Tensor]): スカラー値の辞書
         histograms (dict[str, Any]): ヒストグラムの辞書
         images (dict[str, Any]): 画像データの辞書
         audios (dict[str, Any]): 音声データの辞書
@@ -230,8 +230,14 @@ def get_steps(model_path: str | Path) -> int | None:
         int | None: イテレーション回数
     """
 
-    matches = re.findall(r"\d+", model_path)  # type: ignore
-    return matches[-1] if matches else None
+    model_path_str = str(model_path)
+    matches = re.findall(r"\d+", model_path_str)
+    if not matches:
+        return None
+    try:
+        return int(matches[-1])
+    except ValueError:
+        return None
 
 
 def check_git_hash(model_dir_path: str | Path) -> None:

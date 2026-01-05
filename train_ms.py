@@ -4,10 +4,12 @@ import gc
 import os
 import platform
 from pathlib import Path
+from typing import Any
 
 import torch
 import torch.distributed as dist
 from huggingface_hub import HfApi
+from loguru import Logger as LoguruLogger
 from torch.amp import GradScaler, autocast
 from torch.nn import functional as F
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -435,11 +437,13 @@ def run():
                     optim_dur_disc,
                     skip_optimizer=hps.train.skip_optimizer,
                 )
+                assert optim_dur_disc is not None
                 if not optim_dur_disc.param_groups[0].get("initial_lr"):
                     optim_dur_disc.param_groups[0]["initial_lr"] = dur_resume_lr
             except Exception as ex:
                 # チェックポイントのロードに失敗した場合、デフォルト学習率で初期化
                 logger.warning(f"Failed to load DUR checkpoint: {ex}")
+                assert optim_dur_disc is not None
                 if not optim_dur_disc.param_groups[0].get("initial_lr"):
                     optim_dur_disc.param_groups[0]["initial_lr"] = dur_resume_lr
                 logger.info("Initialize dur_disc with default learning rate")
@@ -463,11 +467,12 @@ def run():
 
             epoch_str = max(epoch_str, 1)
             # global_step = (epoch_str - 1) * len(train_loader)
-            global_step = int(
-                get_steps(
-                    utils.checkpoints.get_latest_checkpoint_path(model_dir, "G_*.pth")
-                )
+            steps = get_steps(
+                utils.checkpoints.get_latest_checkpoint_path(model_dir, "G_*.pth")
             )
+            if steps is None:
+                raise ValueError("Failed to parse global step from checkpoint path.")
+            global_step = steps
             logger.info(
                 f"******************Found the model. Current epoch is {epoch_str}, global step is {global_step}*********************"
             )
@@ -501,7 +506,7 @@ def run():
             epoch_str = 1
             global_step = 0
 
-    def lr_lambda(epoch):
+    def lr_lambda(epoch: int) -> float:
         """
         Learning rate scheduler for warmup and exponential decay.
         - During the warmup period, the learning rate increases linearly.
@@ -510,7 +515,7 @@ def run():
         if epoch < hps.train.warmup_epochs:
             return float(epoch) / float(max(1, hps.train.warmup_epochs))
         else:
-            return hps.train.lr_decay ** (epoch - hps.train.warmup_epochs)
+            return float(hps.train.lr_decay) ** (epoch - hps.train.warmup_epochs)
 
     scheduler_last_epoch = epoch_str - 2
     scheduler_g = torch.optim.lr_scheduler.LambdaLR(
@@ -520,8 +525,11 @@ def run():
         optim_d, lr_lambda=lr_lambda, last_epoch=scheduler_last_epoch
     )
     if net_dur_disc is not None:
+        assert optim_dur_disc is not None
         scheduler_dur_disc = torch.optim.lr_scheduler.LambdaLR(
-            optim_dur_disc, lr_lambda=lr_lambda, last_epoch=scheduler_last_epoch
+            optim_dur_disc,
+            lr_lambda=lr_lambda,
+            last_epoch=scheduler_last_epoch,
         )
     else:
         scheduler_dur_disc = None
@@ -534,7 +542,7 @@ def run():
     diff = abs(
         epoch_str * len(train_loader) - (hps.train.epochs + 1) * len(train_loader)
     )
-    pbar = None
+    pbar: tqdm[Any] | None = None
     if not args.no_progress_bar:
         pbar = tqdm(
             total=global_step + diff,
@@ -545,6 +553,11 @@ def run():
         )
     initial_step = global_step
 
+    writers = (
+        (writer, writer_eval)
+        if writer is not None and writer_eval is not None
+        else None
+    )
     for epoch in range(epoch_str, hps.train.epochs + 1):
         if rank == 0:
             train_and_evaluate(
@@ -553,13 +566,13 @@ def run():
                 epoch,
                 hps,
                 runtime_config,
-                [net_g, net_d, net_dur_disc],
-                [optim_g, optim_d, optim_dur_disc],
-                [scheduler_g, scheduler_d, scheduler_dur_disc],
+                (net_g, net_d, net_dur_disc),
+                (optim_g, optim_d, optim_dur_disc),
+                (scheduler_g, scheduler_d, scheduler_dur_disc),
                 scaler,
-                [train_loader, eval_loader],
+                (train_loader, eval_loader),
                 logger,
-                [writer, writer_eval],
+                writers,
                 pbar,
                 initial_step,
             )
@@ -570,11 +583,11 @@ def run():
                 epoch,
                 hps,
                 runtime_config,
-                [net_g, net_d, net_dur_disc],
-                [optim_g, optim_d, optim_dur_disc],
-                [scheduler_g, scheduler_d, scheduler_dur_disc],
+                (net_g, net_d, net_dur_disc),
+                (optim_g, optim_d, optim_dur_disc),
+                (scheduler_g, scheduler_d, scheduler_dur_disc),
                 scaler,
-                [train_loader, None],
+                (train_loader, None),
                 None,
                 None,
                 pbar,
@@ -583,6 +596,7 @@ def run():
         scheduler_g.step()
         scheduler_d.step()
         if net_dur_disc is not None:
+            assert scheduler_dur_disc is not None
             scheduler_dur_disc.step()
 
         if epoch == hps.train.epochs:
@@ -647,25 +661,35 @@ def run():
 
 
 def train_and_evaluate(
-    rank,
-    local_rank,
-    epoch,
+    rank: int,
+    local_rank: int,
+    epoch: int,
     hps: HyperParameters,
     runtime_config: TrainRuntimeConfig,
-    nets,
-    optims,
-    schedulers,
-    scaler,
-    loaders,
-    logger,
-    writers,
-    pbar: tqdm,
+    nets: tuple[DDP, DDP, DDP | None],
+    optims: tuple[
+        torch.optim.Optimizer,
+        torch.optim.Optimizer,
+        torch.optim.Optimizer | None,
+    ],
+    schedulers: tuple[
+        torch.optim.lr_scheduler.LambdaLR,
+        torch.optim.lr_scheduler.LambdaLR,
+        torch.optim.lr_scheduler.LambdaLR | None,
+    ],
+    scaler: GradScaler,
+    loaders: tuple[DataLoader[Any], DataLoader[Any] | None],
+    logger: LoguruLogger | None,
+    writers: tuple[SummaryWriter, SummaryWriter] | None,
+    pbar: tqdm[Any] | None,
     initial_step: int,
 ):
     net_g, net_d, net_dur_disc = nets
     optim_g, optim_d, optim_dur_disc = optims
     scheduler_g, scheduler_d, scheduler_dur_disc = schedulers
     train_loader, eval_loader = loaders
+    writer: SummaryWriter | None = None
+    writer_eval: SummaryWriter | None = None
     if writers is not None:
         writer, writer_eval = writers
 
@@ -771,6 +795,9 @@ def train_and_evaluate(
                 y, ids_slice * hps.data.hop_length, hps.train.segment_size
             )  # slice
 
+            loss_dur_disc_all: torch.Tensor | None = None
+            loss_dur_gen: torch.Tensor | None = None
+
             # Discriminator
             y_d_hat_r, y_d_hat_g, _, _ = net_d(y, y_hat.detach())
             with autocast(
@@ -801,6 +828,7 @@ def train_and_evaluate(
                         losses_dur_disc_g,
                     ) = discriminator_loss(y_dur_hat_r, y_dur_hat_g)
                     loss_dur_disc_all = loss_dur_disc
+                assert optim_dur_disc is not None
                 optim_dur_disc.zero_grad()
                 scaler.scale(loss_dur_disc_all).backward()
                 scaler.unscale_(optim_dur_disc)
@@ -822,8 +850,9 @@ def train_and_evaluate(
         ):
             # Generator
             y_d_hat_r, y_d_hat_g, fmap_r, fmap_g = net_d(y, y_hat)
+            y_dur_hat_g_gen: list[torch.Tensor] | None = None
             if net_dur_disc is not None:
-                y_dur_hat_r, y_dur_hat_g = net_dur_disc(hidden_x, x_mask, logw, logw_)
+                _, y_dur_hat_g_gen = net_dur_disc(hidden_x, x_mask, logw, logw_)
             with autocast(
                 device_type="cuda",
                 enabled=hps.train.bf16_run,
@@ -837,7 +866,8 @@ def train_and_evaluate(
                 loss_gen, losses_gen = generator_loss(y_d_hat_g)
                 loss_gen_all = loss_gen + loss_fm + loss_mel + loss_dur + loss_kl
                 if net_dur_disc is not None:
-                    loss_dur_gen, losses_dur_gen = generator_loss(y_dur_hat_g)
+                    assert y_dur_hat_g_gen is not None
+                    loss_dur_gen, losses_dur_gen = generator_loss(y_dur_hat_g_gen)
                     loss_gen_all += loss_dur_gen
         optim_g.zero_grad()
         scaler.scale(loss_gen_all).backward()
@@ -897,6 +927,7 @@ def train_and_evaluate(
                 #         attn[0, 0].data.cpu().numpy()
                 #     ),
                 # }
+                assert writer is not None
                 summarize(
                     writer=writer,
                     global_step=global_step,
@@ -910,6 +941,8 @@ def train_and_evaluate(
                 and initial_step != global_step
             ):
                 if not runtime_config.speedup:
+                    assert eval_loader is not None
+                    assert writer_eval is not None
                     evaluate(hps, net_g, eval_loader, writer_eval)
                 assert runtime_config.model_dir is not None
                 utils.checkpoints.save_checkpoint(
@@ -927,6 +960,7 @@ def train_and_evaluate(
                     os.path.join(runtime_config.model_dir, f"D_{global_step}.pth"),
                 )
                 if net_dur_disc is not None:
+                    assert optim_dur_disc is not None
                     utils.checkpoints.save_checkpoint(
                         net_dur_disc,
                         optim_dur_disc,
@@ -979,10 +1013,16 @@ def train_and_evaluate(
     gc.collect()
     torch.cuda.empty_cache()
     if pbar is None and rank == 0:
+        assert logger is not None
         logger.info(f"====> Epoch: {epoch}, step: {global_step}")
 
 
-def evaluate(hps, generator, eval_loader, writer_eval):
+def evaluate(
+    hps: HyperParameters,
+    generator: DDP,
+    eval_loader: DataLoader[Any],
+    writer_eval: SummaryWriter,
+) -> None:
     generator.eval()
     image_dict = {}
     audio_dict = {}

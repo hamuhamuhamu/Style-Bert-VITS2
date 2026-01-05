@@ -285,7 +285,7 @@ include = [
     # Gradio WebUI
     # "gradio_tabs/",
     "app.py",
-    # サーバー
+    # HTTP サーバー
     "server_editor.py",
     "server_fastapi.py",
     # 前処理スクリプト
@@ -299,9 +299,9 @@ include = [
     "style_gen.py",
     "transcribe.py",
     # 学習スクリプト
-    # "train_ms.py",
-    # "train_ms_jp_extra.py",
-    # "train_ms_nanairo.py",
+    "train_ms.py",
+    "train_ms_jp_extra.py",
+    "train_ms_nanairo.py",
     # 学習スクリプトから呼ばれるモジュール
     "training/",
     # ユーティリティー

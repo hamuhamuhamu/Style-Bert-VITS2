@@ -147,7 +147,7 @@ def spec_to_mel_torch(
     num_mels: int,
     sampling_rate: int,
     fmin: float,
-    fmax: float,
+    fmax: float | None,
 ) -> torch.Tensor:
     """
     線形スペクトログラムを Mel スペクトログラムに変換する。
@@ -158,7 +158,7 @@ def spec_to_mel_torch(
         num_mels (int): Mel バンド数
         sampling_rate (int): サンプリングレート
         fmin (float): 最小周波数
-        fmax (float): 最大周波数
+        fmax (float | None): 最大周波数
 
     Returns:
         torch.Tensor: Mel スペクトログラム
@@ -187,7 +187,7 @@ def mel_spectrogram_torch(
     hop_size: int,
     win_size: int,
     fmin: float,
-    fmax: float,
+    fmax: float | None,
     center: bool = False,
 ) -> torch.Tensor:
     """
@@ -201,7 +201,7 @@ def mel_spectrogram_torch(
         hop_size (int): ホップサイズ
         win_size (int): ウィンドウサイズ
         fmin (float): 最小周波数
-        fmax (float): 最大周波数
+        fmax (float | None): 最大周波数
         center (bool): センタリングするかどうか
 
     Returns:

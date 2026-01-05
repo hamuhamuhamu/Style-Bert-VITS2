@@ -2,11 +2,33 @@ import glob
 import os
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, overload
 
 import torch
 
 from style_bert_vits2.logging import logger
+
+
+@overload
+def load_checkpoint(
+    checkpoint_path: str | Path,
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+    skip_optimizer: bool = False,
+    for_infer: bool = False,
+    device: str | torch.device = "cpu",
+) -> tuple[torch.nn.Module, torch.optim.Optimizer, float, int]: ...
+
+
+@overload
+def load_checkpoint(
+    checkpoint_path: str | Path,
+    model: torch.nn.Module,
+    optimizer: None = None,
+    skip_optimizer: bool = False,
+    for_infer: bool = False,
+    device: str | torch.device = "cpu",
+) -> tuple[torch.nn.Module, None, float, int]: ...
 
 
 def load_checkpoint(
