@@ -41,6 +41,7 @@ class TextAudioSpeakerLoader(Dataset[tuple[Any, ...]]):
         self,
         audiopaths_sid_text: str,
         hparams: HyperParametersData,
+        wavs_dir: Path,
         spec_cache: bool = True,
     ):
         """
@@ -49,9 +50,11 @@ class TextAudioSpeakerLoader(Dataset[tuple[Any, ...]]):
         Args:
             audiopaths_sid_text (str): 音声パス・話者 ID・テキストを含むファイルのパス
             hparams (HyperParametersData): ハイパーパラメータ
+            wavs_dir (Path): wavs ディレクトリのパス (train.list 内の相対パスの基準)
             spec_cache (bool): スペクトログラムをキャッシュするかどうか
         """
 
+        self.wavs_dir = wavs_dir
         self.audiopaths_sid_text = load_filepaths_and_text(audiopaths_sid_text)
         self.spec_cache = spec_cache
         self.max_wav_value = hparams.max_wav_value
@@ -102,7 +105,8 @@ class TextAudioSpeakerLoader(Dataset[tuple[Any, ...]]):
         for _id, spk, language, text, phones, tone, word2ph in tqdm(
             self.audiopaths_sid_text, file=sys.stdout, dynamic_ncols=True
         ):
-            audiopath = f"{_id}"
+            # _id は wavs_dir からの相対パスなので、フルパスを構築
+            audiopath = str(self.wavs_dir / _id)
             # if self.min_text_len <= len(phones) and len(phones) <= self.max_text_len:
             phones = phones.split(" ")
             tone = [int(i) for i in tone.split(" ")]

@@ -99,18 +99,21 @@ def save_style_vector(wav_path: str) -> None:
     np.save(f"{wav_path}.npy", style_vec)  # `test.wav` -> `test.wav.npy`
 
 
-def process_line(line: str) -> tuple[str, str | None]:
+def process_line(x: tuple[str, Path]) -> tuple[str, str | None]:
     """
     1行のデータを処理し、スタイルベクトルを生成する。
 
     Args:
-        line (str): 処理対象の行
+        x (tuple[str, Path]): (行データ, wavs_dir) のタプル
 
     Returns:
         tuple[str, str | None]: (行データ, エラー種別) のタプル。エラーがなければエラー種別は None。
     """
 
-    wav_path = line.split("|")[0]
+    line, wavs_dir = x
+    # wav_path は wavs_dir からの相対パスなので、フルパスを構築
+    wav_relative_path = line.split("|")[0]
+    wav_path = str(wavs_dir / wav_relative_path)
     try:
         save_style_vector(wav_path)
         return line, None
@@ -144,6 +147,7 @@ if __name__ == "__main__":
     model_folder_name: str = args.model
     paths = TrainingModelPaths(model_folder_name)
     config_path = paths.config_path
+    wavs_dir = paths.wavs_dir
 
     num_processes: int = args.num_processes
     device: str = args.device
@@ -163,7 +167,10 @@ if __name__ == "__main__":
     with ThreadPoolExecutor(max_workers=num_processes) as executor:
         training_results = list(
             tqdm(
-                executor.map(process_line, training_lines),
+                executor.map(
+                    process_line,
+                    [(line, wavs_dir) for line in training_lines],
+                ),
                 total=len(training_lines),
                 file=SAFE_STDOUT,
                 dynamic_ncols=True,
@@ -195,7 +202,10 @@ if __name__ == "__main__":
     with ThreadPoolExecutor(max_workers=num_processes) as executor:
         val_results = list(
             tqdm(
-                executor.map(process_line, val_lines),
+                executor.map(
+                    process_line,
+                    [(line, wavs_dir) for line in val_lines],
+                ),
                 total=len(val_lines),
                 file=SAFE_STDOUT,
                 dynamic_ncols=True,

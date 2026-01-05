@@ -24,6 +24,8 @@ Generator の学習結果は従来と完全に等価である（どちらも Wav
 ただし、既存の事前学習モデルは WavLM 損失なしで学習されているため、ファインチューニング時に有効化すると学習が不安定になる可能性がある。
 """
 
+from __future__ import annotations
+
 import argparse
 import datetime
 import gc
@@ -31,12 +33,11 @@ import os
 import platform
 from contextlib import nullcontext
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import torch
 import torch.distributed as dist
 from huggingface_hub import HfApi
-from loguru import Logger as LoguruLogger
 from torch.amp import GradScaler, autocast
 from torch.nn import functional as F
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -86,6 +87,10 @@ from training.runtime import (
     TrainRuntimeConfig,
 )
 from training.utils import check_git_hash, get_steps, is_resuming, summarize
+
+
+if TYPE_CHECKING:
+    from loguru import Logger as LoguruLogger
 
 
 # PyTorch 最適化設定 (torch >= 2.1 前提)
@@ -304,7 +309,10 @@ def run():
         writer = SummaryWriter(log_dir=model_dir)
         writer_eval = SummaryWriter(log_dir=os.path.join(model_dir, "eval"))
     train_dataset = TextAudioSpeakerLoader(
-        hps.data.training_files, hps.data, spec_cache=runtime_config.spec_cache
+        hps.data.training_files,
+        hps.data,
+        wavs_dir=paths.wavs_dir,
+        spec_cache=runtime_config.spec_cache,
     )
     collate_fn = TextAudioSpeakerCollate(use_jp_extra=True)
     if not args.not_use_custom_batch_sampler:
@@ -361,7 +369,10 @@ def run():
     eval_loader = None
     if rank == 0 and not args.speedup:
         eval_dataset = TextAudioSpeakerLoader(
-            hps.data.validation_files, hps.data, spec_cache=runtime_config.spec_cache
+            hps.data.validation_files,
+            hps.data,
+            wavs_dir=paths.wavs_dir,
+            spec_cache=runtime_config.spec_cache,
         )
         eval_loader = DataLoader(
             eval_dataset,

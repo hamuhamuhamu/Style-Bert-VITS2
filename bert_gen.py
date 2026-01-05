@@ -36,16 +36,16 @@ update_dict()
 
 
 def process_line(
-    x: tuple[str, bool, str, bool],
+    x: tuple[str, bool, str, bool, Path],
 ) -> None:
     """
     1行のデータを処理し、BERT 特徴量を生成する。
 
     Args:
-        x (tuple[str, bool, str, bool]): (行データ, add_blank フラグ, デバイス, マルチデバイス使用フラグ) のタプル
+        x (tuple[str, bool, str, bool, Path]): (行データ, add_blank フラグ, デバイス, マルチデバイス使用フラグ, wavs_dir) のタプル
     """
 
-    line, add_blank, device, use_multi_device = x
+    line, add_blank, device, use_multi_device, wavs_dir = x
 
     if use_multi_device:
         rank = mp.current_process()._identity
@@ -79,7 +79,9 @@ def process_line(
             word2ph[i] = word2ph[i] * 2
         word2ph[0] += 1
 
-    bert_path = wav_path.replace(".WAV", ".wav").replace(".wav", ".bert.pt")
+    # wav_path は wavs_dir からの相対パスなので、フルパスを構築
+    bert_relative_path = wav_path.replace(".WAV", ".wav").replace(".wav", ".bert.pt")
+    bert_path = wavs_dir / bert_relative_path
 
     try:
         bert = torch.load(bert_path)
@@ -119,6 +121,7 @@ if __name__ == "__main__":
     model_folder_name: str = args.model
     paths = TrainingModelPaths(model_folder_name)
     config_path = paths.config_path
+    wavs_dir = paths.wavs_dir
 
     hps = HyperParameters.load_from_json(config_path)
     lines: list[str] = []
@@ -151,7 +154,10 @@ if __name__ == "__main__":
                 tqdm(
                     executor.map(
                         process_line,
-                        [(line, add_blank, device, use_multi_device) for line in lines],
+                        [
+                            (line, add_blank, device, use_multi_device, wavs_dir)
+                            for line in lines
+                        ],
                     ),
                     total=len(lines),
                     file=SAFE_STDOUT,

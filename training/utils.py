@@ -248,7 +248,8 @@ def check_git_hash(model_dir_path: str | Path) -> None:
         model_dir_path (str | Path): モデルのディレクトリのパス
     """
 
-    source_dir = os.path.dirname(os.path.realpath(__file__))
+    # training/ ディレクトリの親（プロジェクトルート）を取得
+    source_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
     if not os.path.exists(os.path.join(source_dir, ".git")):
         logger.warning(
             f"{source_dir} is not a git repository, therefore hash value comparison will be ignored."
