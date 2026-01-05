@@ -1,3 +1,7 @@
+"""
+TensorBoard への書き込みや可視化など、学習スクリプトでのみ使用される関数を提供する。
+"""
+
 import glob
 import logging
 import os
@@ -11,14 +15,11 @@ import torch
 from numpy.typing import NDArray
 
 from style_bert_vits2.logging import logger
-from style_bert_vits2.models.utils import (
-    checkpoints,  # type: ignore
-    safetensors,  # type: ignore
-)
 
 
 if TYPE_CHECKING:
-    # tensorboard はライブラリとしてインストールされている場合は依存関係に含まれないため、型チェック時のみインポートする
+    # tensorboard はライブラリとしてインストールされている場合は依存関係に含まれないため、
+    # 型チェック時のみインポートする
     from torch.utils.tensorboard import SummaryWriter
 
 
@@ -93,7 +94,6 @@ def plot_spectrogram_to_numpy(spectrogram: NDArray[Any]) -> NDArray[Any]:
         mpl_logger = logging.getLogger("matplotlib")
         mpl_logger.setLevel(logging.WARNING)
     import matplotlib.pylab as plt
-    import numpy as np
 
     fig, ax = plt.subplots(figsize=(10, 2))
     im = ax.imshow(spectrogram, aspect="auto", origin="lower", interpolation="none")

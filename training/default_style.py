@@ -12,10 +12,21 @@ def save_neutral_vector(
     output_dir: Path | str,
     config_path: Path | str,
     config_output_path: Path | str,
-):
+) -> None:
+    """
+    すべての音声から中立的なスタイルベクトル（平均値）を計算し保存する。
+    1つのスタイル (Neutral) のみを持つ設定を生成する。
+
+    Args:
+        wav_dir (Path | str): 音声ファイルが格納されているディレクトリ
+        output_dir (Path | str): スタイルベクトルの出力先ディレクトリ
+        config_path (Path | str): 入力設定ファイルのパス
+        config_output_path (Path | str): 出力設定ファイルのパス
+    """
+
     wav_dir = Path(wav_dir)
     output_dir = Path(output_dir)
-    embs = []
+    embs: list[np.ndarray] = []
     for file in wav_dir.rglob("*.npy"):
         xvec = np.load(file)
         embs.append(np.expand_dims(xvec, axis=0))
@@ -40,7 +51,19 @@ def save_styles_by_dirs(
     output_dir: Path | str,
     config_path: Path | str,
     config_output_path: Path | str,
-):
+) -> None:
+    """
+    サブディレクトリごとにスタイルベクトルを生成し保存する。
+    各サブディレクトリの音声から平均スタイルベクトルを計算し、複数スタイルの設定を生成する。
+    サブディレクトリが2つ未満の場合は save_neutral_vector にフォールバックする。
+
+    Args:
+        wav_dir (Path | str): 音声ファイルが格納されているディレクトリ
+        output_dir (Path | str): スタイルベクトルの出力先ディレクトリ
+        config_path (Path | str): 入力設定ファイルのパス
+        config_output_path (Path | str): 出力設定ファイルのパス
+    """
+
     wav_dir = Path(wav_dir)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -58,13 +81,13 @@ def save_styles_by_dirs(
         return
 
     # First get mean of all for Neutral
-    embs = []
+    embs: list[np.ndarray] = []
     for file in wav_dir.rglob("*.npy"):
         xvec = np.load(file)
         embs.append(np.expand_dims(xvec, axis=0))
     x = np.concatenate(embs, axis=0)  # (N, 256)
     mean = np.mean(x, axis=0)  # (256,)
-    style_vectors = [mean]
+    style_vectors: list[np.ndarray] = [mean]
 
     names = [DEFAULT_STYLE]
     for style_dir in subdirs:

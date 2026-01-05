@@ -9,8 +9,8 @@ from pathlib import Path
 
 from style_bert_vits2.logging import logger
 from style_bert_vits2.models.hyper_parameters import HyperParameters
-from style_bert_vits2.models.utils import load_filepaths_and_text
 from style_bert_vits2.utils.paths import TrainingModelPaths, add_model_argument
+from training.utils import load_filepaths_and_text
 
 
 def _parse_args() -> argparse.Namespace:

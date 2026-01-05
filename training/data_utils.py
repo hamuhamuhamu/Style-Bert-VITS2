@@ -1,6 +1,11 @@
+"""
+学習データの読み込み、前処理、バッチ処理機能を提供する。
+"""
+
 import os
 import random
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -10,16 +15,16 @@ from torch.utils.data import Dataset
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 
-from mel_processing import mel_spectrogram_torch, spectrogram_torch
 from style_bert_vits2.constants import Languages
 from style_bert_vits2.logging import logger
 from style_bert_vits2.models import commons
 from style_bert_vits2.models.hyper_parameters import HyperParametersData
-from style_bert_vits2.models.utils import load_filepaths_and_text, load_wav_to_torch
 from style_bert_vits2.nlp import (
     cleaned_text_to_sequence,
     convert_unsupported_phones_for_current_model,
 )
+from training.mel_processing import mel_spectrogram_torch, spectrogram_torch
+from training.utils import load_filepaths_and_text, load_wav_to_torch
 
 
 """Multi speaker version"""
@@ -38,6 +43,15 @@ class TextAudioSpeakerLoader(Dataset[tuple[Any, ...]]):
         hparams: HyperParametersData,
         spec_cache: bool = True,
     ):
+        """
+        TextAudioSpeakerLoader を初期化する。
+
+        Args:
+            audiopaths_sid_text (str): 音声パス・話者 ID・テキストを含むファイルのパス
+            hparams (HyperParametersData): ハイパーパラメータ
+            spec_cache (bool): スペクトログラムをキャッシュするかどうか
+        """
+
         self.audiopaths_sid_text = load_filepaths_and_text(audiopaths_sid_text)
         self.spec_cache = spec_cache
         self.max_wav_value = hparams.max_wav_value
@@ -72,10 +86,11 @@ class TextAudioSpeakerLoader(Dataset[tuple[Any, ...]]):
         if self.use_external_speaker_embedding:
             self._build_speaker_to_audio_paths()
 
-    def _filter(self):
+    def _filter(self) -> None:
         """
         Filter text & store spec lengths
         """
+
         # Store spectrogram lengths for Bucketing
         # wav_length ~= file_size / (wav_channels * Bytes per dim) = file_size / (1 * 2)
         # spec_length = wav_length // hop_length
@@ -148,7 +163,20 @@ class TextAudioSpeakerLoader(Dataset[tuple[Any, ...]]):
         # Avoid selecting the same utterance when possible
         return random.choice(candidates_excluding)
 
-    def get_audio_text_speaker_pair(self, audiopath_sid_text):
+    def get_audio_text_speaker_pair(
+        self,
+        audiopath_sid_text: list[Any],
+    ) -> tuple[Any, ...]:
+        """
+        音声・テキスト・話者のペアを取得する。
+
+        Args:
+            audiopath_sid_text (list[Any]): 音声パス、話者 ID、テキスト情報のリスト
+
+        Returns:
+            tuple[Any, ...]: 処理済みのデータタプル
+        """
+
         # separate filename, speaker_id and text
         audiopath, sid, language, text, phones, tone, word2ph = audiopath_sid_text
         speaker_name = sid
@@ -226,7 +254,17 @@ class TextAudioSpeakerLoader(Dataset[tuple[Any, ...]]):
                 style_vec,
             )
 
-    def get_audio(self, filename):
+    def get_audio(self, filename: str) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        音声ファイルを読み込み、スペクトログラムと正規化された波形を返す。
+
+        Args:
+            filename (str): 音声ファイルのパス
+
+        Returns:
+            tuple[torch.Tensor, torch.Tensor]: スペクトログラムと正規化された波形のタプル
+        """
+
         audio, sampling_rate = load_wav_to_torch(filename)
         if sampling_rate != self.sampling_rate:
             raise ValueError(
@@ -241,6 +279,8 @@ class TextAudioSpeakerLoader(Dataset[tuple[Any, ...]]):
             spec = torch.load(spec_filename)
         except:
             if self.use_mel_spec_posterior:
+                assert self.hparams.mel_fmin is not None
+                assert self.hparams.mel_fmax is not None
                 spec = mel_spectrogram_torch(
                     audio_norm,
                     self.filter_length,
@@ -266,7 +306,37 @@ class TextAudioSpeakerLoader(Dataset[tuple[Any, ...]]):
                 torch.save(spec, spec_filename)
         return spec, audio_norm
 
-    def get_text(self, text, word2ph, phone, tone, language_str, wav_path):
+    def get_text(
+        self,
+        text: str,
+        word2ph: list[int],
+        phone: list[str],
+        tone: list[int],
+        language_str: str,
+        wav_path: str,
+    ) -> tuple[
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+    ]:
+        """
+        テキストデータを処理し、BERT 特徴量と音素シーケンスを返す。
+
+        Args:
+            text (str): テキスト
+            word2ph (list[int]): 単語から音素へのマッピング
+            phone (list[str]): 音素リスト
+            tone (list[int]): トーンリスト
+            language_str (str): 言語文字列
+            wav_path (str): 音声ファイルのパス
+
+        Returns:
+            tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]: BERT 特徴量と音素シーケンスのタプル
+        """
+
         # 変更を加える前にコピーを作成しておく
         phone = phone.copy()
         tone = tone.copy()
@@ -280,11 +350,13 @@ class TextAudioSpeakerLoader(Dataset[tuple[Any, ...]]):
             word2ph,
             language,
         )
-        phone, tone, language = cleaned_text_to_sequence(phone, tone, language)
+        phone_seq, tone_seq, language_seq = cleaned_text_to_sequence(
+            phone, tone, language
+        )
         if self.add_blank:
-            phone = commons.intersperse(phone, 0)
-            tone = commons.intersperse(tone, 0)
-            language = commons.intersperse(language, 0)
+            phone_seq = commons.intersperse(phone_seq, 0)
+            tone_seq = commons.intersperse(tone_seq, 0)
+            language_seq = commons.intersperse(language_seq, 0)
             for i in range(len(word2ph)):
                 word2ph[i] = word2ph[i] * 2
             word2ph[0] += 1
@@ -296,9 +368,9 @@ class TextAudioSpeakerLoader(Dataset[tuple[Any, ...]]):
                 bert_path,
                 map_location=torch.device("cpu"),
             ).to(dtype=torch.float32)
-            if bert_ori.shape[-1] != len(phone):
+            if bert_ori.shape[-1] != len(phone_seq):
                 raise ValueError(
-                    f"BERT length mismatch: {bert_ori.shape[-1]} vs {len(phone)}"
+                    f"BERT length mismatch: {bert_ori.shape[-1]} vs {len(phone_seq)}"
                 )
             bert_ori = bert_ori.contiguous()
         except Exception as ex:
@@ -308,36 +380,65 @@ class TextAudioSpeakerLoader(Dataset[tuple[Any, ...]]):
 
         if language_str == "ZH":
             bert = bert_ori
-            ja_bert = torch.zeros(1024, len(phone))
-            en_bert = torch.zeros(1024, len(phone))
+            ja_bert = torch.zeros(1024, len(phone_seq))
+            en_bert = torch.zeros(1024, len(phone_seq))
         elif language_str == "JP":
-            bert = torch.zeros(1024, len(phone))
+            bert = torch.zeros(1024, len(phone_seq))
             ja_bert = bert_ori
-            en_bert = torch.zeros(1024, len(phone))
+            en_bert = torch.zeros(1024, len(phone_seq))
         elif language_str == "EN":
-            bert = torch.zeros(1024, len(phone))
-            ja_bert = torch.zeros(1024, len(phone))
+            bert = torch.zeros(1024, len(phone_seq))
+            ja_bert = torch.zeros(1024, len(phone_seq))
             en_bert = bert_ori
         else:
             raise ValueError(f"Unsupported language: {language_str}")
-        phone = torch.LongTensor(phone)
-        tone = torch.LongTensor(tone)
-        language = torch.LongTensor(language)
-        return bert, ja_bert, en_bert, phone, tone, language
+        phone_tensor = torch.LongTensor(phone_seq)
+        tone_tensor = torch.LongTensor(tone_seq)
+        language_tensor = torch.LongTensor(language_seq)
+        return bert, ja_bert, en_bert, phone_tensor, tone_tensor, language_tensor
 
-    def get_sid(self, sid):
-        sid = torch.LongTensor([int(sid)])
-        return sid
+    def get_sid(self, sid: str) -> torch.Tensor:
+        """
+        話者 ID をテンソルに変換する。
 
-    def __getitem__(self, index):
+        Args:
+            sid (str): 話者 ID 文字列
+
+        Returns:
+            torch.Tensor: 話者 ID テンソル
+        """
+
+        sid_tensor = torch.LongTensor([int(sid)])
+        return sid_tensor
+
+    def __getitem__(self, index: int) -> tuple[Any, ...]:
+        """
+        インデックスに対応するデータを取得する。
+
+        Args:
+            index (int): データインデックス
+
+        Returns:
+            tuple[Any, ...]: 処理済みのデータタプル
+        """
+
         return self.get_audio_text_speaker_pair(self.audiopaths_sid_text[index])
 
-    def __len__(self):
+    def __len__(self) -> int:
+        """
+        データセットのサイズを返す。
+
+        Returns:
+            int: データセットのサイズ
+        """
+
         return len(self.audiopaths_sid_text)
 
 
 class TextAudioSpeakerCollate:
-    """Zero-pads model inputs and targets"""
+    """
+    Zero-pads model inputs and targets
+    """
 
     def __init__(
         self,
@@ -345,16 +446,30 @@ class TextAudioSpeakerCollate:
         use_jp_extra: bool = False,
         use_external_speaker_embedding: bool = False,
     ):
+        """
+        TextAudioSpeakerCollate を初期化する。
+
+        Args:
+            return_ids (bool): ID を返すかどうか
+            use_jp_extra (bool): JP-Extra モデルを使用するかどうか
+            use_external_speaker_embedding (bool): 外部話者埋め込みを使用するかどうか
+        """
+
         self.return_ids = return_ids
         self.use_jp_extra = use_jp_extra
         self.use_external_speaker_embedding = use_external_speaker_embedding
 
-    def __call__(self, batch):
-        """Collate's training batch from normalized text, audio and speaker identities
-        PARAMS
-        ------
-        batch: [text_normalized, spec_normalized, wav_normalized, sid]
+    def __call__(self, batch: list[tuple[Any, ...]]) -> tuple[Any, ...]:
         """
+        Collates training batches from normalized text, audio, and speaker identities.
+
+        Args:
+            batch (list[tuple[Any, ...]]): データサンプルのリスト
+
+        Returns:
+            tuple[Any, ...]: パディングされたバッチデータ
+        """
+
         # Right zero-pad all one-hot text sequences to max input length
         _, ids_sorted_decreasing = torch.sort(
             torch.LongTensor([x[1].size(1) for x in batch]), dim=0, descending=True
@@ -534,13 +649,25 @@ class DistributedBucketSampler(DistributedSampler[int]):
 
     def __init__(
         self,
-        dataset,
-        batch_size,
-        boundaries,
-        num_replicas=None,
-        rank=None,
-        shuffle=True,
+        dataset: TextAudioSpeakerLoader,
+        batch_size: int,
+        boundaries: list[int],
+        num_replicas: int | None = None,
+        rank: int | None = None,
+        shuffle: bool = True,
     ):
+        """
+        DistributedBucketSampler を初期化する。
+
+        Args:
+            dataset (TextAudioSpeakerLoader): データセット
+            batch_size (int): バッチサイズ
+            boundaries (list[int]): バケット境界
+            num_replicas (int | None): レプリカ数
+            rank (int | None): ランク
+            shuffle (bool): シャッフルするかどうか
+        """
+
         super().__init__(dataset, num_replicas=num_replicas, rank=rank, shuffle=shuffle)
         self.lengths = dataset.lengths
         self.batch_size = batch_size
@@ -557,10 +684,17 @@ class DistributedBucketSampler(DistributedSampler[int]):
         self.total_size = sum(self.num_samples_per_bucket)
         self.num_samples = self.total_size // self.num_replicas
 
-    def _create_buckets(self):
-        buckets = [[] for _ in range(len(self.boundaries) - 1)]
-        excluded_too_short = []
-        excluded_too_long = []
+    def _create_buckets(self) -> tuple[list[list[int]], list[int]]:
+        """
+        バケットを作成する。
+
+        Returns:
+            tuple[list[list[int]], list[int]]: バケットと各バケットのサンプル数
+        """
+
+        buckets: list[list[int]] = [[] for _ in range(len(self.boundaries) - 1)]
+        excluded_too_short: list[tuple[int, int]] = []
+        excluded_too_long: list[tuple[int, int]] = []
 
         for i in range(len(self.lengths)):
             length = self.lengths[i]
@@ -645,7 +779,14 @@ class DistributedBucketSampler(DistributedSampler[int]):
             num_samples_per_bucket.append(len_bucket + rem)
         return buckets, num_samples_per_bucket
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[list[int]]:  # type: ignore[override]
+        """
+        イテレータを返す。
+
+        Yields:
+            Iterator[list[int]]: バッチデータ
+        """
+
         # deterministically shuffle based on epoch
         g = torch.Generator()
         g.manual_seed(self.epoch)
@@ -696,7 +837,24 @@ class DistributedBucketSampler(DistributedSampler[int]):
         assert len(self.batches) * self.batch_size == self.num_samples
         return iter(self.batches)
 
-    def _bisect(self, x, lo=0, hi=None):
+    def _bisect(
+        self,
+        x: int,
+        lo: int = 0,
+        hi: int | None = None,
+    ) -> int:
+        """
+        バイナリサーチでバケットインデックスを探す。
+
+        Args:
+            x (int): 長さ
+            lo (int): 下限
+            hi (int | None): 上限
+
+        Returns:
+            int: バケットインデックス（見つからない場合は -1）
+        """
+
         if hi is None:
             hi = len(self.boundaries) - 1
 
@@ -711,5 +869,12 @@ class DistributedBucketSampler(DistributedSampler[int]):
         else:
             return -1
 
-    def __len__(self):
+    def __len__(self) -> int:
+        """
+        バッチ数を返す。
+
+        Returns:
+            int: バッチ数
+        """
+
         return self.num_samples // self.batch_size

@@ -303,10 +303,7 @@ include = [
     # "train_ms_jp_extra.py",
     # "train_ms_nanairo.py",
     # 学習スクリプトから呼ばれるモジュール
-    "data_utils.py",
-    "default_style.py",
-    # "losses.py",
-    # "mel_processing.py",
+    "training/",
     # ユーティリティー
     "convert_bert_onnx.py",
     "convert_onnx.py",

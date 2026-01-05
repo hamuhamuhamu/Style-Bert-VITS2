@@ -16,15 +16,6 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 from transformers.trainer_pt_utils import DistributedLengthGroupedSampler
 
-# logging.getLogger("numba").setLevel(logging.WARNING)
-import default_style
-from data_utils import (
-    DistributedBucketSampler,
-    TextAudioSpeakerCollate,
-    TextAudioSpeakerLoader,
-)
-from losses import discriminator_loss, feature_loss, generator_loss, kl_loss
-from mel_processing import mel_spectrogram_torch, spec_to_mel_torch
 from style_bert_vits2.constants import (
     DEFAULT_TRAIN_ENV,
 )
@@ -43,7 +34,18 @@ from style_bert_vits2.utils.paths import (
     get_paths_config,
 )
 from style_bert_vits2.utils.stdout_wrapper import SAFE_STDOUT
-from style_bert_vits2.utils.training import TrainRuntimeConfig
+
+# logging.getLogger("numba").setLevel(logging.WARNING)
+from training import default_style
+from training.data_utils import (
+    DistributedBucketSampler,
+    TextAudioSpeakerCollate,
+    TextAudioSpeakerLoader,
+)
+from training.losses import discriminator_loss, feature_loss, generator_loss, kl_loss
+from training.mel_processing import mel_spectrogram_torch, spec_to_mel_torch
+from training.runtime import TrainRuntimeConfig
+from training.utils import check_git_hash, get_steps, is_resuming, summarize
 
 
 # PyTorch 最適化設定 (torch >= 2.1 前提)
@@ -231,9 +233,9 @@ def run():
     writer = None
     writer_eval = None
     if rank == 0 and not args.speedup:
-        # logger = utils.get_logger(runtime_config.model_dir)
+        # logger = get_logger(runtime_config.model_dir)
         # logger.info(hps)
-        utils.check_git_hash(model_dir)
+        check_git_hash(model_dir)
         writer = SummaryWriter(log_dir=model_dir)
         writer_eval = SummaryWriter(log_dir=os.path.join(model_dir, "eval"))
     train_dataset = TextAudioSpeakerLoader(
@@ -420,7 +422,7 @@ def run():
             net_dur_disc, device_ids=[local_rank], find_unused_parameters=True
         )
 
-    if utils.is_resuming(model_dir):
+    if is_resuming(model_dir):
         if net_dur_disc is not None:
             # チェックポイントが見つからない場合のデフォルト学習率
             dur_resume_lr = hps.train.learning_rate
@@ -462,7 +464,7 @@ def run():
             epoch_str = max(epoch_str, 1)
             # global_step = (epoch_str - 1) * len(train_loader)
             global_step = int(
-                utils.get_steps(
+                get_steps(
                     utils.checkpoints.get_latest_checkpoint_path(model_dir, "G_*.pth")
                 )
             )
@@ -895,7 +897,7 @@ def train_and_evaluate(
                 #         attn[0, 0].data.cpu().numpy()
                 #     ),
                 # }
-                utils.summarize(
+                summarize(
                     writer=writer,
                     global_step=global_step,
                     # images=image_dict,
@@ -1070,7 +1072,7 @@ def evaluate(hps, generator, eval_loader, writer_eval):
                 )
                 audio_dict.update({f"gt/audio_{batch_idx}": y[0, :, : y_lengths[0]]})
 
-    utils.summarize(
+    summarize(
         writer=writer_eval,
         global_step=global_step,
         images=image_dict,

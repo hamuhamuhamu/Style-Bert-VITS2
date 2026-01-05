@@ -18,8 +18,8 @@ from style_bert_vits2.models.infer import get_net_g
 from style_bert_vits2.models.models_nanairo import (
     SynthesizerTrn as SynthesizerTrnNanairo,
 )
-from style_bert_vits2.models.utils import load_filepaths_and_text
 from style_bert_vits2.utils.paths import TrainingModelPaths, add_model_argument
+from training.utils import load_filepaths_and_text
 
 
 def _parse_args() -> argparse.Namespace:
