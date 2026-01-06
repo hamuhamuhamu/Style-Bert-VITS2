@@ -39,46 +39,55 @@ class GradientMonitor:
 
     Generator の勾配ノルム (grad_norm_g) の指数移動平均 (EMA) を追跡し、
     以下の条件で学習率を自動的に減少させる。
-    1. スパイク検出: 現在の grad_norm_g が EMA を大幅に上回った場合
-    2. 持続的高勾配検出: 高い勾配ノルムが複数ステップ連続した場合
+
+    1. EMA 閾値超過: smoothed（EMA）値が閾値を超え続けている場合
+       - TensorBoard の smoothed グラフが高止まりしている状態に対応
+       - 瞬間的なスパイクは EMA に吸収されるためスルーされる
+    2. 急激なスパイク検出: 現在の grad_norm_g が EMA を大幅に上回った場合
+       - 学習の破綻を防ぐための安全弁
 
     機械学習の専門知識がないユーザーでも、勾配関連の問題に対して
     手動介入なしで安定した学習を行えるようにすることが目的。
-
-    Args:
-        ema_alpha: EMA 計算の平滑化係数 (0 < alpha <= 1)。
-            値が大きいほど直近の観測値を重視する。
-        spike_threshold: スパイク検出の倍率。
-            現在の grad_norm > spike_threshold * EMA の場合にスパイクと判定。
-        high_grad_threshold: 「高勾配」と判定する絶対閾値。
-            この値を超える勾配は持続的高勾配検出の対象となる。
-        sustained_high_steps: 学習率減少をトリガーするまでの連続高勾配ステップ数。
-        lr_decay_factor: 調整時に学習率に乗じる係数。
-        min_lr: 過度な減少を防ぐための最小学習率。
-        cooldown_steps: 連続した学習率調整間の最小ステップ数。
     """
 
     def __init__(
         self,
-        ema_alpha: float = 0.1,  # EMA 平滑化係数
-        spike_threshold: float = 5.0,  # スパイク検出: 現在値 > 5倍 EMA でトリガー
-        high_grad_threshold: float = 100.0,  # 「高勾配」と判定する閾値
-        sustained_high_steps: int = 50,  # 調整トリガーまでの連続高勾配ステップ数
+        ema_alpha: float = 0.4,  # EMA 平滑化係数 (smoothing=0.6 相当)
+        spike_threshold: float = 3.0,  # スパイク検出: 現在値 > 3倍 EMA でトリガー
+        ema_high_threshold: float = 400.0,  # EMA (smoothed) がこの値を超えたら介入
         lr_decay_factor: float = 0.5,  # トリガー時に学習率を 50% に減少
         min_lr: float = 1e-6,  # 最小学習率
-        cooldown_steps: int = 1000,  # 連続調整間のステップ数
+        cooldown_steps: int = 2000,  # 連続調整間のステップ数
+        warmup_steps: int = 500,  # 学習初期の猶予ステップ数
     ):
+        """
+        GradientMonitor を初期化する。
+
+        Args:
+            ema_alpha: EMA 計算の平滑化係数 (0 < alpha <= 1)。
+                値が大きいほど直近の観測値を重視する。
+                0.4 は TensorBoard の smoothing=0.6 に相当。
+            spike_threshold: スパイク検出の倍率。
+                現在の grad_norm > spike_threshold * EMA の場合にスパイクと判定。
+            ema_high_threshold: EMA (smoothed 値) が「高い」と判定する閾値。
+                EMA がこの値を超えたら学習率調整の対象となる。
+            lr_decay_factor: 調整時に学習率に乗じる係数。
+            min_lr: 過度な減少を防ぐための最小学習率。
+            cooldown_steps: 連続した学習率調整間の最小ステップ数。
+            warmup_steps: 学習初期に介入しない猶予ステップ数。
+                序盤は勾配が不安定になりやすいため。
+        """
+
         self.ema_alpha = ema_alpha
         self.spike_threshold = spike_threshold
-        self.high_grad_threshold = high_grad_threshold
-        self.sustained_high_steps = sustained_high_steps
+        self.ema_high_threshold = ema_high_threshold
         self.lr_decay_factor = lr_decay_factor
         self.min_lr = min_lr
         self.cooldown_steps = cooldown_steps
+        self.warmup_steps = warmup_steps
 
         # 内部状態
         self.ema: float | None = None
-        self.high_count: int = 0
         self.steps_since_adjustment: int = 0
         self.total_steps: int = 0
         self.adjustment_history: list[tuple[int, float, float, str]] = []
@@ -125,39 +134,41 @@ class GradientMonitor:
             return False
 
         # EMA を更新
+        # EMA 更新式: new_ema = alpha * current + (1 - alpha) * old_ema
         old_ema = self.ema
         self.ema = self.ema_alpha * grad_norm_g + (1 - self.ema_alpha) * self.ema
 
-        # クールダウン期間中かどうかを確認
+        # warmup 期間中は介入しない（学習初期は勾配が不安定になりやすいため）
+        if self.total_steps < self.warmup_steps:
+            return False
+
+        # クールダウン期間中は介入しない
         is_in_cooldown = self.steps_since_adjustment < self.cooldown_steps
-
-        # スパイク検出: 現在の grad_norm が EMA を大幅に上回っているか
-        is_spike = grad_norm_g > self.spike_threshold * old_ema and old_ema > 0
-
-        # 持続的高勾配検出のための追跡
-        if grad_norm_g > self.high_grad_threshold:
-            self.high_count += 1
-        else:
-            # 勾配が正常に戻ったらカウンターをリセット
-            self.high_count = 0
-
-        is_sustained_high = self.high_count >= self.sustained_high_steps
+        if is_in_cooldown:
+            return False
 
         # 学習率調整が必要かどうかを判定
         is_adjustment_needed = False
         adjustment_reason = ""
 
-        if is_spike and not is_in_cooldown:
+        # 1. EMA（smoothed 値）が閾値を超えている場合
+        # これは「TensorBoard の smoothed グラフが高止まりしている状態」に対応
+        # 瞬間的なスパイクは EMA に吸収されるためスルーされる
+        if self.ema > self.ema_high_threshold:
+            is_adjustment_needed = True
+            adjustment_reason = (
+                f"EMA (smoothed) exceeded threshold: EMA: {self.ema:.2f} > {self.ema_high_threshold:.0f}. "
+                f"Current grad_norm_g: {grad_norm_g:.2f}."
+            )
+
+        # 2. 急激なスパイク検出（安全弁）
+        # 現在の grad_norm が EMA を大幅に上回った場合
+        # これは学習の破綻を防ぐための安全弁
+        elif grad_norm_g > self.spike_threshold * old_ema and old_ema > 0:
             is_adjustment_needed = True
             adjustment_reason = (
                 f"Spike detected: grad_norm_g: {grad_norm_g:.2f} is {grad_norm_g / old_ema:.1f}x "
-                f"higher than EMA: {old_ema:.2f}"
-            )
-        elif is_sustained_high and not is_in_cooldown:
-            is_adjustment_needed = True
-            adjustment_reason = (
-                f"Sustained high gradient detected: grad_norm_g {grad_norm_g:.2f} exceeded "
-                f"{self.high_grad_threshold} for {self.high_count} steps."
+                f"higher than EMA: {old_ema:.2f}."
             )
 
         if is_adjustment_needed:
@@ -177,8 +188,8 @@ class GradientMonitor:
                 self.steps_since_adjustment = 0
 
                 logger.warning(
-                    f"[GradientMonitor] Learning rate adjusted at step {global_step}: {old_lr:.6f} -> {new_lr:.6f}. "
-                    f"Reason: {adjustment_reason}"
+                    f"[GradientMonitor] Learning rate adjusted at step {global_step}: "
+                    f"{old_lr:.6f} -> {new_lr:.6f}. Reason: {adjustment_reason}"
                 )
                 return True
 
@@ -194,7 +205,6 @@ class GradientMonitor:
 
         return {
             "ema": self.ema,
-            "high_count": self.high_count,
             "steps_since_adjustment": self.steps_since_adjustment,
             "total_steps": self.total_steps,
             "adjustment_history": self.adjustment_history,
@@ -210,7 +220,6 @@ class GradientMonitor:
         """
 
         self.ema = state_dict.get("ema", None)
-        self.high_count = state_dict.get("high_count", 0)
         self.steps_since_adjustment = state_dict.get("steps_since_adjustment", 0)
         self.total_steps = state_dict.get("total_steps", 0)
         self.adjustment_history = state_dict.get("adjustment_history", [])
