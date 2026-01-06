@@ -980,7 +980,7 @@ sdist = { url = "https://files.pythonhosted.org/packages/a2/55/8f8cab2afd404cf57
 [[package]]
 name = "e2k"
 version = "0.6.2"
-source = { git = "https://github.com/tsukumijima/e2k.git?branch=master#9920754e15d8c96404bef0bd81d424352fb7a48b" }
+source = { git = "https://github.com/tsukumijima/e2k.git?rev=9920754e15d8c96404bef0bd81d424352fb7a48b#9920754e15d8c96404bef0bd81d424352fb7a48b" }
 dependencies = [
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.3.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
@@ -3500,7 +3500,7 @@ wheels = [
 [[package]]
 name = "pyannote-audio"
 version = "4.0.4.dev5+g8ef26980d"
-source = { git = "https://github.com/tsukumijima/pyannote-audio.git?branch=develop#8ef26980df1126469979565bf84f637c8a8f6d3c" }
+source = { git = "https://github.com/tsukumijima/pyannote-audio.git?rev=8ef26980df1126469979565bf84f637c8a8f6d3c#8ef26980df1126469979565bf84f637c8a8f6d3c" }
 dependencies = [
     { name = "asteroid-filterbanks" },
     { name = "einops" },
@@ -4762,7 +4762,7 @@ wheels = [
 [[package]]
 name = "speechbrain"
 version = "1.0.3"
-source = { git = "https://github.com/speechbrain/speechbrain.git?branch=develop#264b642d7820547f02ae25cba028a4ae96f0e88f" }
+source = { git = "https://github.com/speechbrain/speechbrain.git?rev=264b642d7820547f02ae25cba028a4ae96f0e88f#264b642d7820547f02ae25cba028a4ae96f0e88f" }
 dependencies = [
     { name = "huggingface-hub" },
     { name = "hyperpyyaml" },
@@ -5067,7 +5067,7 @@ requires-dist = [
     { name = "aivmlib" },
     { name = "cmudict" },
     { name = "cn2an" },
-    { name = "e2k", git = "https://github.com/tsukumijima/e2k.git?branch=master" },
+    { name = "e2k", git = "https://github.com/tsukumijima/e2k.git?rev=9920754e15d8c96404bef0bd81d424352fb7a48b" },
     { name = "g2p-en" },
     { name = "jaconv" },
     { name = "jieba" },
@@ -5124,7 +5124,7 @@ full = [
     { name = "onnxsim-prebuilt" },
     { name = "protobuf", specifier = ">=4.25" },
     { name = "psutil" },
-    { name = "pyannote-audio", git = "https://github.com/tsukumijima/pyannote-audio.git?branch=develop" },
+    { name = "pyannote-audio", git = "https://github.com/tsukumijima/pyannote-audio.git?rev=8ef26980df1126469979565bf84f637c8a8f6d3c" },
     { name = "pyloudnorm" },
     { name = "pyright" },
     { name = "pytest" },
@@ -5133,7 +5133,7 @@ full = [
     { name = "rich" },
     { name = "ruff" },
     { name = "scipy" },
-    { name = "speechbrain", git = "https://github.com/speechbrain/speechbrain.git?branch=develop" },
+    { name = "speechbrain", git = "https://github.com/speechbrain/speechbrain.git?rev=264b642d7820547f02ae25cba028a4ae96f0e88f" },
     { name = "taskipy" },
     { name = "tensorboard" },
     { name = "torch", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and sys_platform != 'win32')", specifier = ">=2.9.1,<2.10.0" },
@@ -5142,7 +5142,7 @@ full = [
     { name = "torchaudio", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'win32'", specifier = ">=2.9.1,<2.10.0", index = "https://download.pytorch.org/whl/cu126" },
     { name = "torchcodec", specifier = ">=0.9.1,<0.10.0" },
     { name = "umap-learn" },
-    { name = "utmosv2", git = "https://github.com/sarulab-speech/UTMOSv2.git?branch=main" },
+    { name = "utmosv2", git = "https://github.com/sarulab-speech/UTMOSv2.git?rev=b4528c0418acca38c1c5c92a40c3e4a1e216fbbe" },
     { name = "uvicorn" },
 ]
 server = [
@@ -5195,13 +5195,13 @@ train = [
     { name = "onnxruntime", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and sys_platform != 'win32')" },
     { name = "onnxruntime-directml", marker = "sys_platform == 'win32'" },
     { name = "onnxruntime-gpu", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "pyannote-audio", git = "https://github.com/tsukumijima/pyannote-audio.git?branch=develop" },
+    { name = "pyannote-audio", git = "https://github.com/tsukumijima/pyannote-audio.git?rev=8ef26980df1126469979565bf84f637c8a8f6d3c" },
     { name = "pyloudnorm" },
     { name = "pyright" },
     { name = "pytest" },
     { name = "ruff" },
     { name = "scipy" },
-    { name = "speechbrain", git = "https://github.com/speechbrain/speechbrain.git?branch=develop" },
+    { name = "speechbrain", git = "https://github.com/speechbrain/speechbrain.git?rev=264b642d7820547f02ae25cba028a4ae96f0e88f" },
     { name = "taskipy" },
     { name = "tensorboard" },
     { name = "torch", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and sys_platform != 'win32')", specifier = ">=2.9.1,<2.10.0" },
@@ -5209,7 +5209,7 @@ train = [
     { name = "torchaudio", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and sys_platform != 'win32')", specifier = ">=2.9.1,<2.10.0" },
     { name = "torchaudio", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'win32'", specifier = ">=2.9.1,<2.10.0", index = "https://download.pytorch.org/whl/cu126" },
     { name = "torchcodec", specifier = ">=0.9.1,<0.10.0" },
-    { name = "utmosv2", git = "https://github.com/sarulab-speech/UTMOSv2.git?branch=main" },
+    { name = "utmosv2", git = "https://github.com/sarulab-speech/UTMOSv2.git?rev=b4528c0418acca38c1c5c92a40c3e4a1e216fbbe" },
 ]
 webui = [
     { name = "accelerate" },
@@ -5847,7 +5847,7 @@ wheels = [
 [[package]]
 name = "utmosv2"
 version = "1.2.1"
-source = { git = "https://github.com/sarulab-speech/UTMOSv2.git?branch=main#b4528c0418acca38c1c5c92a40c3e4a1e216fbbe" }
+source = { git = "https://github.com/sarulab-speech/UTMOSv2.git?rev=b4528c0418acca38c1c5c92a40c3e4a1e216fbbe#b4528c0418acca38c1c5c92a40c3e4a1e216fbbe" }
 dependencies = [
     { name = "librosa" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
