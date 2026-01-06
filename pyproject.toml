@@ -133,6 +133,7 @@ train = [
     "tensorboard",
     "torchaudio>=2.9.1,<2.10.0",
     "torchcodec>=0.9.1,<0.10.0",
+    "utmosv2",
 ]
 ## ここまでの依存関係を全てインストールするグループ
 ## Usage: uv sync --group full
@@ -204,6 +205,8 @@ torch = [
 torchaudio = [
     { index = "pytorch-cu126", marker = "(sys_platform == 'linux' and platform_machine == 'x86_64') or sys_platform == 'win32'" },
 ]
+# UTMOSv2 は PyPI に公開されていないため GitHub から取得する
+utmosv2 = { git = "https://github.com/sarulab-speech/UTMOSv2.git", branch = "main" }
 
 # PyTorch の CUDA 12.6 版のパッケージインデックス
 [[tool.uv.index]]
