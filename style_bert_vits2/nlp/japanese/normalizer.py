@@ -411,6 +411,11 @@ __CURRENCY_PATTERN = re.compile(
 __NUMBER_PATTERN = re.compile(r"[0-9]+(\.[0-9]+)?")
 __NUMBER_WITH_SEPARATOR_PATTERN = re.compile("[0-9]{1,3}(,[0-9]{3})+")
 
+# 数字と数字の間のスペースを検出するパターン
+# スペース削除時に数字が連結して意図しない大きな数になるのを防ぐ
+# 例: "5090 32G" → "509032G" → 「ゴジュウマンキュウセンサンジュウニ」を防止
+__DIGIT_SPACE_DIGIT_PATTERN = re.compile(r"(\d)\s+(\d)")
+
 # __replace_symbols() で使う正規表現パターン
 __DATE_ZERO_PADDING_PATTERN = re.compile(r"(?<!\d)0(\d)(?=月|日|時|分|秒)")
 __TIME_PATTERN = re.compile(r"(\d+)時(\d+)分(?:(\d+)秒)?")
@@ -522,6 +527,11 @@ def normalize_text(text: str) -> str:
     res = res.replace("~", "ー")
     res = res.replace("～", "ー")
     res = res.replace("〜", "ー")
+
+    # 数字と数字の間のスペースを ' に変換
+    # replace_punctuation() で半角スペースが削除される前に処理することで、
+    # "5090 32G" → "509032G" → 「ゴジュウマンキュウセンサンジュウニ」のような数字連結を防ぐ
+    res = __DIGIT_SPACE_DIGIT_PATTERN.sub(r"\1'\2", res)
 
     res = replace_punctuation(res)  # 句読点等正規化、読めない文字を削除
 
