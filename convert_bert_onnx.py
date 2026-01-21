@@ -319,6 +319,10 @@ if __name__ == "__main__":
             "attention_mask",
         ],
         output_names=["output"],
+        # TorchDynamo による ONNX エクスポート明示的に無効化する
+        # PyTorch 2.9 以降では dynamo=True がデフォルトとなったため、指定しないと TorchDynamo で ONNX エクスポートが行われる
+        # VITS2 モデル側と異なり BERT なので TorchDynamo にも対応してそうではあるが、詳細が変わる可能性があることから従来の挙動に合わせる
+        dynamo=False,
         dynamic_axes={
             "input_ids": {0: "batch_size", 1: "sequence_length"},
             "token_type_ids": {0: "batch_size", 1: "sequence_length"},

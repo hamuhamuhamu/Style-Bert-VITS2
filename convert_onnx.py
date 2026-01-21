@@ -275,6 +275,9 @@ if __name__ == "__main__":
                         "noise_scale_w",
                     ],
                     output_names=["output"],
+                    # 実装上 TorchDynamo による ONNX エクスポートは動作しないので、明示的に無効化する
+                    # PyTorch 2.9 以降では dynamo=True がデフォルトとなったため、これを指定しないと動作しない
+                    dynamo=False,
                     dynamic_axes={
                         "x_tst": {0: "batch_size", 1: "x_tst_max_length"},
                         "x_tst_lengths": {0: "batch_size"},
@@ -369,6 +372,9 @@ if __name__ == "__main__":
                         "noise_scale_w",
                     ],
                     output_names=["output"],
+                    # 実装上 TorchDynamo による ONNX エクスポートは動作しないので、明示的に無効化する
+                    # PyTorch 2.9 以降では dynamo=True がデフォルトとなったため、これを指定しないと動作しない
+                    dynamo=False,
                     dynamic_axes={
                         "x_tst": {0: "batch_size", 1: "x_tst_max_length"},
                         "x_tst_lengths": {0: "batch_size"},
