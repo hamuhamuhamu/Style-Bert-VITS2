@@ -433,21 +433,29 @@ class MLP(nn.Module):
 
 class ExternalSpeakerAdapter(nn.Module):
     """
-    外部 speaker embedding から g を生成する軽量 Adapter。
+    外部 speaker embedding から g を生成する Adapter（残差接続付き 3 層 MLP）。
+
+    入力次元と出力次元が異なる（例: 192 → 512）変換において、射影した入力を
+    ベースラインとして保持し、メインパスは「差分」のみを学習する設計。
+    これにより入力の話者特性を大きく壊さずに、必要な変換だけを学習できる。
     """
 
     def __init__(self, in_dim: int, out_dim: int, hidden_dim: int) -> None:
         super().__init__()
         self.fc1 = nn.Linear(in_dim, hidden_dim)
-        self.norm = nn.LayerNorm(hidden_dim)
-        self.fc2 = nn.Linear(hidden_dim, out_dim)
+        self.norm1 = nn.LayerNorm(hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
+        self.norm2 = nn.LayerNorm(hidden_dim)
+        self.fc3 = nn.Linear(hidden_dim, out_dim)
+        # 残差接続: 入力を出力次元に射影してベースラインとする
+        self.residual_proj = nn.Linear(in_dim, out_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.fc1(x)
-        x = self.norm(x)
-        x = F.silu(x)
-        x = self.fc2(x)
-        return x
+        residual = self.residual_proj(x)
+        h = F.silu(self.norm1(self.fc1(x)))
+        h = F.silu(self.norm2(self.fc2(h)))
+        h = self.fc3(h)
+        return h + residual
 
 
 class TextEncoder(nn.Module):
