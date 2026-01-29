@@ -2895,30 +2895,26 @@ wheels = [
 
 [[package]]
 name = "onnxsim-prebuilt"
-version = "0.4.36.post1"
+version = "0.4.39.post2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "onnx" },
     { name = "rich" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/22/4e/10fb6041904ad11c7839b87619daf0c9922023c197a93c96b8ac94f53291/onnxsim_prebuilt-0.4.36.post1.tar.gz", hash = "sha256:119f5f70230e880cc1bf661afefa021c886411097b8bb63173ea14fdac1a516a", size = 21000373, upload-time = "2025-07-02T12:12:26.941Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/89/39/9d05c88e05b4495d870b96244808bcec89bddf0d6de7fb37a1dfaec32a83/onnxsim_prebuilt-0.4.39.post2.tar.gz", hash = "sha256:731420cd8830d2ebde341c41abac1b718718891db4934f2655d7ec4df0b100fd", size = 12152559, upload-time = "2026-01-29T03:07:50.375Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/92/82/2b4c19e0b616dc7875c3a08875ebbcaebd0eb810a5c3e49637035c54c168/onnxsim_prebuilt-0.4.36.post1-cp310-cp310-macosx_10_15_universal2.whl", hash = "sha256:12f4cc9cc7b6cf35b06b40e833a9906f10bdbc3c0fe94ee727480a71870ee0c0", size = 3350912, upload-time = "2025-07-02T12:12:03.581Z" },
-    { url = "https://files.pythonhosted.org/packages/09/7f/86b6b1f8db35107e54d62f211974e156d9131b427955859d926f149fdd38/onnxsim_prebuilt-0.4.36.post1-cp310-cp310-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:4a3a3559d2a41688847900677c4cecf7d7237de267fbe0e2f3d9f7bc185b1edf", size = 1988067, upload-time = "2025-07-02T12:12:05.175Z" },
-    { url = "https://files.pythonhosted.org/packages/ce/2d/8f340977fd0502143a4bc5adf70ed55eafd8b591bf8c8ea514d531e02284/onnxsim_prebuilt-0.4.36.post1-cp310-cp310-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:baadcdfc400987c378adb6f8f81b01e3e8affe04fc6ea858241e60e58318ac02", size = 2212321, upload-time = "2025-07-02T12:12:06.671Z" },
-    { url = "https://files.pythonhosted.org/packages/59/df/9a7d1cc9ff737d0a1e80c5f7eb59c16160aee3b0ee98e74a53c1408e5566/onnxsim_prebuilt-0.4.36.post1-cp310-cp310-win_amd64.whl", hash = "sha256:ea3728b33e94a405a0d94141019edb4eae1e641a9d56a44c825bd9f8f7061fe9", size = 1317480, upload-time = "2025-07-02T12:12:08.091Z" },
-    { url = "https://files.pythonhosted.org/packages/aa/64/207c995545dc9dc60043d456f16c3064470444ab110a717fafb8f51a7f34/onnxsim_prebuilt-0.4.36.post1-cp311-cp311-macosx_10_15_universal2.whl", hash = "sha256:64301d5fd81dba7d31965d54a5ac5e406433a247b9ab40ef3a22d0136cd41f65", size = 3358859, upload-time = "2025-07-02T12:12:09.512Z" },
-    { url = "https://files.pythonhosted.org/packages/d0/a0/14c71c3b27f1f3c4e82721a68fe68d64883ad9eb0c42c13d477898bc3cbc/onnxsim_prebuilt-0.4.36.post1-cp311-cp311-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:89102a32aaaa445249c0416f44031640488df42ccaf223de7d5fadaaa6ba74a6", size = 1988023, upload-time = "2025-07-02T12:12:11.081Z" },
-    { url = "https://files.pythonhosted.org/packages/f7/82/be9d42c77ceab8c4406c4fc92bffc73a012b9c93a7bc24d5ca04a6bcbcdb/onnxsim_prebuilt-0.4.36.post1-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:3a6187c774b1d8ac2d0d4204e44cd00e5e87e2f0c6e4c44cc97061b23007eb67", size = 2212264, upload-time = "2025-07-02T12:12:12.125Z" },
-    { url = "https://files.pythonhosted.org/packages/4e/5f/11e97ae048e0f6d73b05782c9f9bd4eff810b18c38b07c85b2d35a03b9b7/onnxsim_prebuilt-0.4.36.post1-cp311-cp311-win_amd64.whl", hash = "sha256:e3c6245867c60d68b7ae64259f76e11fb779fe0595955e54ca0a8d0799dab924", size = 1317461, upload-time = "2025-07-02T12:12:13.534Z" },
-    { url = "https://files.pythonhosted.org/packages/d7/d5/6b15aee1b75a18984b3a6eb0a2cc395fe331e5be72ed55ac97f532d85e13/onnxsim_prebuilt-0.4.36.post1-cp312-cp312-macosx_10_15_universal2.whl", hash = "sha256:13bebc54684a0646986a31fc58065d102978d90328dcaf190194e20e304273d9", size = 3360582, upload-time = "2025-07-02T12:12:14.596Z" },
-    { url = "https://files.pythonhosted.org/packages/b5/56/ce52a2d05489832a90089b063b4a440a646bb8bf6c3b5997c036eedab4d8/onnxsim_prebuilt-0.4.36.post1-cp312-cp312-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:db81c50e0df7f4c31be715bfd2637068bfca0512e0936153780b0cfd66209571", size = 1986895, upload-time = "2025-07-02T12:12:15.815Z" },
-    { url = "https://files.pythonhosted.org/packages/ce/3f/7eb5343a133f35c2629af8e89e25e277e7e4090530077355b5bac62a3e19/onnxsim_prebuilt-0.4.36.post1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:ffc8dd8b575f51d15ab7b9ffa662d66858b687cb4a2a48c51aa13f2031f715de", size = 2211156, upload-time = "2025-07-02T12:12:18.258Z" },
-    { url = "https://files.pythonhosted.org/packages/86/de/0625beab5e3cd64dde339304317177c8ed1558d141c4f9ecda82a7b50bc2/onnxsim_prebuilt-0.4.36.post1-cp312-cp312-win_amd64.whl", hash = "sha256:b7eb893b13fa53db4c5a80d1f205bd8cb2eec52732b2f45cb347f699605514db", size = 1318015, upload-time = "2025-07-02T12:12:19.48Z" },
-    { url = "https://files.pythonhosted.org/packages/8f/f6/9111bcd21138d3d4df60c3af75f9026ad39c1e7a1873b9bf146baae6cb0b/onnxsim_prebuilt-0.4.36.post1-cp313-cp313-macosx_10_15_universal2.whl", hash = "sha256:1b6aad14d6bbabd87ade5ac4f6729e48d62585731cdc181cb4ac9757af7c393b", size = 3360575, upload-time = "2025-07-02T12:12:21.427Z" },
-    { url = "https://files.pythonhosted.org/packages/6f/1d/b780b6a16cd709ab52c0dfbd01bc5bd7f82225c0af15554fb6fde99f1c34/onnxsim_prebuilt-0.4.36.post1-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:1989256273297f92335b4929199ab81543b6bd8065f163b50f79fa213951cd6f", size = 1986840, upload-time = "2025-07-02T12:12:23.046Z" },
-    { url = "https://files.pythonhosted.org/packages/20/d0/1572cf04bb8d35d12c158a4a9693361a8825408b4faa7d90d2fc3b5d8ac3/onnxsim_prebuilt-0.4.36.post1-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:44e61dad354d73d0633c062f0489d7947ce2fb10706eaa7c33af3d54b4127e31", size = 2211308, upload-time = "2025-07-02T12:12:24.161Z" },
-    { url = "https://files.pythonhosted.org/packages/90/79/d50035c8a25a36eb70bb6826449bdc139cdd46f6130f09221d463d875d34/onnxsim_prebuilt-0.4.36.post1-cp313-cp313-win_amd64.whl", hash = "sha256:6da09ab17348721e23c7d8bff7a365be37c165ea87f2958a7ec3f3f68257a3fa", size = 1317958, upload-time = "2025-07-02T12:12:25.549Z" },
+    { url = "https://files.pythonhosted.org/packages/88/48/41df16eb40188fdfda61cc0b917352ea3a412f21fe81a8d44d4b521ca224/onnxsim_prebuilt-0.4.39.post2-cp310-cp310-macosx_10_15_universal2.whl", hash = "sha256:c1e061dc142cc1eb5b483c37e85267bfde065f32fdc4f6c3e2bad5d4e0209661", size = 3742457, upload-time = "2026-01-29T03:07:27.49Z" },
+    { url = "https://files.pythonhosted.org/packages/2f/de/d473eb52675a20a4c05938a7e5c9a8f6819da5e9a7f1f34349b85c90796e/onnxsim_prebuilt-0.4.39.post2-cp310-cp310-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:05143aa0609822d5c1a7ab00077e6c76b74ce8483934185a050fe4530325de0c", size = 2472831, upload-time = "2026-01-29T03:07:29.742Z" },
+    { url = "https://files.pythonhosted.org/packages/ba/d0/59bed073ec37f252da8d72055dfaca49d999edc3150cd3401c081dee6d64/onnxsim_prebuilt-0.4.39.post2-cp310-cp310-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:39ff782c82c8fe3ebf0fc9a6fa8f29da6787325f09325327b5c9e6c86720562e", size = 2763714, upload-time = "2026-01-29T03:07:31.501Z" },
+    { url = "https://files.pythonhosted.org/packages/7d/e7/fc82d055f245b352e77f7bccf67a84be28afb1ecf7ed15cd48a33f6d0315/onnxsim_prebuilt-0.4.39.post2-cp310-cp310-win_amd64.whl", hash = "sha256:85670a8885e34c56920ae4f4f16afe3d3ed9019d5d92981b0f1af7318374f3dc", size = 1609273, upload-time = "2026-01-29T03:07:33.298Z" },
+    { url = "https://files.pythonhosted.org/packages/19/e8/088b2920990cd37840c8624ff02efa18318c61e77500071ae17860e31ef1/onnxsim_prebuilt-0.4.39.post2-cp311-cp311-macosx_10_15_universal2.whl", hash = "sha256:78ccc734fbb6c037a89e9d8a9e0b4abcda000854e6d2bad64cf497a3ce92bdc1", size = 3742139, upload-time = "2026-01-29T03:07:35.423Z" },
+    { url = "https://files.pythonhosted.org/packages/ce/54/867845c3fee32a5fd1f0e0def8296a648789e0ca3ba370afa39db4adb689/onnxsim_prebuilt-0.4.39.post2-cp311-cp311-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:f883fd21d2ab0f3f6253366a3963911011ab80f4748b1a83949170cf2f120ad8", size = 2472984, upload-time = "2026-01-29T03:07:37.322Z" },
+    { url = "https://files.pythonhosted.org/packages/e8/f0/f2b4b5d14823a73bcc3a07178ecdec47a2c021a96f85fd75cf85b7d7275b/onnxsim_prebuilt-0.4.39.post2-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:bf2f4688ac48072a4706873609ceec00f65ac397c45460837f827a04b73d872e", size = 2763435, upload-time = "2026-01-29T03:07:38.886Z" },
+    { url = "https://files.pythonhosted.org/packages/21/ae/175559f7d1fe7d68ff587e160cd694553c75fa7c766ec591f13eb43b063b/onnxsim_prebuilt-0.4.39.post2-cp311-cp311-win_amd64.whl", hash = "sha256:ad2ea55e44901bacac5a592bcd1a6fa8b34540e7047b59d906b3689bbc939d26", size = 1609158, upload-time = "2026-01-29T03:07:40.774Z" },
+    { url = "https://files.pythonhosted.org/packages/7c/54/0197a7ab94785031517513f326e804558baba41537d37dc77fe0c359fada/onnxsim_prebuilt-0.4.39.post2-cp312-abi3-macosx_10_15_universal2.whl", hash = "sha256:b454921fb8f6f4f48ef26e49fa629074d3a0428c0f1e4f746215a7d7f0b72944", size = 3736656, upload-time = "2026-01-29T03:07:42.186Z" },
+    { url = "https://files.pythonhosted.org/packages/a0/ad/88c7ef2d16e6c78577363abf0656f207a6130da5a8b00d3a9bd67313dfc7/onnxsim_prebuilt-0.4.39.post2-cp312-abi3-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:59b671d008fb5f8c51cd20c3c06475e64dd6267659f61912cf1579bee25d9405", size = 2468928, upload-time = "2026-01-29T03:07:44.435Z" },
+    { url = "https://files.pythonhosted.org/packages/64/3a/677d73f0fd8a0a9baa58e470e4d70f6ff3cffce432c2b3e35802c56ae175/onnxsim_prebuilt-0.4.39.post2-cp312-abi3-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:5f129c78b379f040caafc40360db1db91617179c0663049e712c7dde4a0d6c28", size = 2759770, upload-time = "2026-01-29T03:07:46.821Z" },
+    { url = "https://files.pythonhosted.org/packages/fe/8c/5e69d067256f7e27b6905e8a16938097a98d563f8dc9f0c7171fd4a9da29/onnxsim_prebuilt-0.4.39.post2-cp312-abi3-win_amd64.whl", hash = "sha256:ddfa75679246e51b1cc55e37d02b473c653c906b2987f817c220adf2c90f1cf2", size = 1608304, upload-time = "2026-01-29T03:07:48.182Z" },
 ]
 
 [[package]]
@@ -5080,9 +5076,9 @@ requires-dist = [
     { name = "onnxruntime-directml", marker = "sys_platform == 'win32' and extra == 'onnxruntime'" },
     { name = "onnxruntime-gpu", marker = "platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'onnxruntime'" },
     { name = "pydantic", specifier = ">=2.0" },
-    { name = "pyopenjtalk-plus" },
+    { name = "pyopenjtalk-plus", specifier = ">=0.4.1.post7" },
     { name = "pypinyin" },
-    { name = "pyworld-prebuilt" },
+    { name = "pyworld-prebuilt", specifier = ">=0.3.5.post2" },
     { name = "safetensors" },
     { name = "torch", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'torch') or (sys_platform == 'win32' and extra == 'torch')", specifier = ">=2.1", index = "https://download.pytorch.org/whl/cu126" },
     { name = "torch", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux' and extra == 'torch') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'torch')", specifier = ">=2.1" },
@@ -5121,7 +5117,7 @@ full = [
     { name = "onnxruntime", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and sys_platform != 'win32')" },
     { name = "onnxruntime-directml", marker = "sys_platform == 'win32'" },
     { name = "onnxruntime-gpu", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "onnxsim-prebuilt" },
+    { name = "onnxsim-prebuilt", specifier = ">=0.4.39.post2" },
     { name = "protobuf", specifier = ">=4.25" },
     { name = "psutil" },
     { name = "pyannote-audio", git = "https://github.com/tsukumijima/pyannote-audio.git?rev=8ef26980df1126469979565bf84f637c8a8f6d3c" },
@@ -5174,7 +5170,7 @@ tools = [
     { name = "onnxruntime", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and sys_platform != 'win32')" },
     { name = "onnxruntime-directml", marker = "sys_platform == 'win32'" },
     { name = "onnxruntime-gpu", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "onnxsim-prebuilt" },
+    { name = "onnxsim-prebuilt", specifier = ">=0.4.39.post2" },
     { name = "protobuf", specifier = ">=4.25" },
     { name = "pyright" },
     { name = "pytest" },
@@ -5512,20 +5508,20 @@ dependencies = [
     { name = "typing-extensions", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'win32'" },
 ]
 wheels = [
-    { url = "https://download.pytorch.org/whl/cu126/torch-2.9.1%2Bcu126-cp310-cp310-manylinux_2_28_x86_64.whl" },
-    { url = "https://download.pytorch.org/whl/cu126/torch-2.9.1%2Bcu126-cp310-cp310-win_amd64.whl" },
-    { url = "https://download.pytorch.org/whl/cu126/torch-2.9.1%2Bcu126-cp311-cp311-manylinux_2_28_x86_64.whl" },
-    { url = "https://download.pytorch.org/whl/cu126/torch-2.9.1%2Bcu126-cp311-cp311-win_amd64.whl" },
-    { url = "https://download.pytorch.org/whl/cu126/torch-2.9.1%2Bcu126-cp312-cp312-manylinux_2_28_x86_64.whl" },
-    { url = "https://download.pytorch.org/whl/cu126/torch-2.9.1%2Bcu126-cp312-cp312-win_amd64.whl" },
-    { url = "https://download.pytorch.org/whl/cu126/torch-2.9.1%2Bcu126-cp313-cp313-manylinux_2_28_x86_64.whl" },
-    { url = "https://download.pytorch.org/whl/cu126/torch-2.9.1%2Bcu126-cp313-cp313-win_amd64.whl" },
-    { url = "https://download.pytorch.org/whl/cu126/torch-2.9.1%2Bcu126-cp313-cp313t-manylinux_2_28_x86_64.whl" },
-    { url = "https://download.pytorch.org/whl/cu126/torch-2.9.1%2Bcu126-cp313-cp313t-win_amd64.whl" },
-    { url = "https://download.pytorch.org/whl/cu126/torch-2.9.1%2Bcu126-cp314-cp314-manylinux_2_28_x86_64.whl" },
-    { url = "https://download.pytorch.org/whl/cu126/torch-2.9.1%2Bcu126-cp314-cp314-win_amd64.whl" },
-    { url = "https://download.pytorch.org/whl/cu126/torch-2.9.1%2Bcu126-cp314-cp314t-manylinux_2_28_x86_64.whl" },
-    { url = "https://download.pytorch.org/whl/cu126/torch-2.9.1%2Bcu126-cp314-cp314t-win_amd64.whl" },
+    { url = "https://download.pytorch.org/whl/cu126/torch-2.9.1%2Bcu126-cp310-cp310-manylinux_2_28_x86_64.whl", hash = "sha256:8840a4439668cad44961933cedee9b1242eb67da93ec49c1ab552f4dbce10bbb" },
+    { url = "https://download.pytorch.org/whl/cu126/torch-2.9.1%2Bcu126-cp310-cp310-win_amd64.whl", hash = "sha256:37249b92a40042cdd35e536fd8d628453093c879678c9e5587279e2055d69c40" },
+    { url = "https://download.pytorch.org/whl/cu126/torch-2.9.1%2Bcu126-cp311-cp311-manylinux_2_28_x86_64.whl", hash = "sha256:57e4f908dda76a6d5bf7138727d95fcf7ce07115bc040e7ed541d9d25074b28d" },
+    { url = "https://download.pytorch.org/whl/cu126/torch-2.9.1%2Bcu126-cp311-cp311-win_amd64.whl", hash = "sha256:8afd366413aeb51a4732042719f168fae6f4c72326e59e9bdbe20a5c5be52418" },
+    { url = "https://download.pytorch.org/whl/cu126/torch-2.9.1%2Bcu126-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:67e9b1054f435d33af6fa67343f93d73dc2d37013623672d6ffb24ce39b666c2" },
+    { url = "https://download.pytorch.org/whl/cu126/torch-2.9.1%2Bcu126-cp312-cp312-win_amd64.whl", hash = "sha256:f2f1c68c7957ed8b6b56fc450482eb3fa53947fb74838b03834a1760451cf60f" },
+    { url = "https://download.pytorch.org/whl/cu126/torch-2.9.1%2Bcu126-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:f58a36f53f6bf24312d5d548b640062c99a40394fcb7d0c5a70375aa5be31628" },
+    { url = "https://download.pytorch.org/whl/cu126/torch-2.9.1%2Bcu126-cp313-cp313-win_amd64.whl", hash = "sha256:625703f377a53e20cade81291ac742f044ea46a1e86a3949069e62e321025ba3" },
+    { url = "https://download.pytorch.org/whl/cu126/torch-2.9.1%2Bcu126-cp313-cp313t-manylinux_2_28_x86_64.whl", hash = "sha256:ad0d5dd90f8e43c5a739e662b0542448e36968002efc4c2a11c5ad3b01faf04b" },
+    { url = "https://download.pytorch.org/whl/cu126/torch-2.9.1%2Bcu126-cp313-cp313t-win_amd64.whl", hash = "sha256:2985f3ca723da9f8bc596b38698946a394a0cab541f008ac5bcf5b36696d4ecb" },
+    { url = "https://download.pytorch.org/whl/cu126/torch-2.9.1%2Bcu126-cp314-cp314-manylinux_2_28_x86_64.whl", hash = "sha256:a7feda6101616061bbd680665bd44cd8ddbdbf5a11ed4c20615821ba09cc9f1c" },
+    { url = "https://download.pytorch.org/whl/cu126/torch-2.9.1%2Bcu126-cp314-cp314-win_amd64.whl", hash = "sha256:3c24c69528f328f844d4cd2677a076ff324fe24edde3ed9c00f28d008dc11166" },
+    { url = "https://download.pytorch.org/whl/cu126/torch-2.9.1%2Bcu126-cp314-cp314t-manylinux_2_28_x86_64.whl", hash = "sha256:a18e6b0eccee2163f90cc894d0a12ed0a83cf009c8597063a05237f2606438d0" },
+    { url = "https://download.pytorch.org/whl/cu126/torch-2.9.1%2Bcu126-cp314-cp314t-win_amd64.whl", hash = "sha256:5b8b89f0284bd0d3caf178b64cbc9a5ca785f6c8fa19980718a09e7c13c56131" },
 ]
 
 [[package]]
