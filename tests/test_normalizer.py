@@ -1028,3 +1028,56 @@ def test_normalize_text_complex():
         )
         == "ロックファイブイズアシリーズオブロックチップRK3588's'ベースドエスビーシー'シングルボードコンピューター'バイラダ.イットキャンランリナックス,アンドロイド,ビーエスディーアンドアザーディストリビューションズ.ロックファイブカムズインツーモデルズ,モデルAアンドモデルB.ボスモデルズオファー4ギガバイト,8ギガバイト,16ギガバイトアンド32ギガバイトオプションズ.フォーディテールズディファレンスビトゥイーンモデルAアンドモデルB,プリーズチェックスペシフィケーションズ.ロックファイブフィーチャーズアオクタコアアームプロセッサー'4xコーテックスA76プラス4xコーテックスA55',64ビット3200メガビット毎秒エルピーディーディーアールフォー,アップトゥーはちケー60エイチディーエムアイ,ミピーディーエスアイ,ミピーシーエスアイ,3.5ミリメートルジャックウィズマイク,ユーエスビーポート,2.5ジービーイーラン,ピーシーアイイー3.0,ピーシーアイイー2.0,40ピンカラーエクスパンションヘッダー,アールティーシー.オルソ,ロックファイブサポーツユーエスビーピーディーアンドキューシーパワーリング."
     )
+
+
+def test_normalize_text_itaiji():
+    """異体字・旧字体→新字体の変換テスト"""
+
+    # 基本的な旧字体→新字体の変換
+    assert normalize_text("學校") == "学校"
+    assert normalize_text("國語") == "国語"
+    assert normalize_text("經濟") == "経済"
+    assert normalize_text("醫學") == "医学"
+    assert normalize_text("圖書館") == "図書館"
+    assert normalize_text("鐵道") == "鉄道"
+    assert normalize_text("歷史") == "歴史"
+    assert normalize_text("實驗") == "実験"
+    assert normalize_text("體育") == "体育"
+    assert normalize_text("變化") == "変化"
+
+    # 旧字体を含む文
+    assert normalize_text("國語の學校で勉強する。") == "国語の学校で勉強する."
+    assert normalize_text("圖書館で經濟學を學ぶ。") == "図書館で経済学を学ぶ."
+    assert normalize_text("醫學部の實驗は嚴しい。") == "医学部の実験は厳しい."
+
+    # 新字体のみの文はそのまま通過する
+    assert normalize_text("学校で勉強する。") == "学校で勉強する."
+    assert normalize_text("図書館で本を読む。") == "図書館で本を読む."
+
+    # 旧字体と新字体が混在する文
+    assert normalize_text("學校と図書館で勉強する。") == "学校と図書館で勉強する."
+
+    # 旧字体と他の正規化処理が組み合わさるケース
+    # 旧字体変換 + 日付正規化
+    assert normalize_text("2024/01/01に學校へ行く。") == "2024年1月1日に学校へ行く."
+    # 旧字体変換 + 英単語カタカナ変換
+    assert normalize_text("經濟のNewsを讀む。") == "経済のニューズを読む."
+    # 旧字体変換 + 単位変換
+    assert normalize_text("學校まで3km歩く。") == "学校まで3キロメートル歩く."
+
+    # 複数の旧字体が連続するケース
+    assert normalize_text("國際經濟學") == "国際経済学"
+    assert normalize_text("勸業銀行") == "勧業銀行"
+    assert normalize_text("總務省") == "総務省"
+    assert normalize_text("辯護士") == "弁護士"
+    assert normalize_text("營業權") == "営業権"
+
+    # 辨・瓣・辯 はいずれも「弁」に変換される
+    assert normalize_text("辨當") == "弁当"
+    assert normalize_text("花瓣") == "花弁"
+    assert normalize_text("辯論") == "弁論"
+
+    # 旧字体が含まれる固有名詞的な用例
+    assert normalize_text("龍が如く") == "竜が如く"
+    assert normalize_text("櫻の花が咲く。") == "桜の花が咲く."
+    assert normalize_text("澤山の寶物") == "沢山の宝物"

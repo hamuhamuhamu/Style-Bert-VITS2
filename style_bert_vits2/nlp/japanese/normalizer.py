@@ -7,6 +7,7 @@ from e2k import C2K, NGram
 from jaconv import jaconv
 from num2words import num2words
 
+from style_bert_vits2.nlp.japanese.itaiji_map import ITAIJI_MAP
 from style_bert_vits2.nlp.japanese.katakana_map import KATAKANA_MAP
 from style_bert_vits2.nlp.symbols import PUNCTUATIONS
 
@@ -15,6 +16,10 @@ from style_bert_vits2.nlp.symbols import PUNCTUATIONS
 # NGram は英単語として読ませるか、アルファベット読みするべきかを判定するモデル
 __characters_to_katakana = C2K()
 __should_transliterated_word_by_ngram = NGram()
+
+# 異体字・旧字体→新字体の変換テーブル
+# str.translate() 用に構築しておくことで、異体字・旧字体を新字体に高速に一括変換できる
+__ITAIJI_TRANSLATE_TABLE = str.maketrans(ITAIJI_MAP)
 
 # 記号類の正規化マップ
 __SYMBOL_REPLACE_MAP = {
@@ -519,6 +524,10 @@ def normalize_text(text: str) -> str:
     res = res.replace("\u200b", "")
 
     res = unicodedata.normalize("NFKC", res)  # ここで Unicode 正規化が行われる
+
+    # OpenJTalk (MeCab) 辞書に存在しない可能性が高い旧字体を新字体に統一し、辞書ヒット率を高める
+    ## NFKC 正規化後に実行することで、NFKC で統一しきれない旧字体も新字体に置換できる
+    res = res.translate(__ITAIJI_TRANSLATE_TABLE)
 
     res = __convert_english_to_katakana(res)  # 英単語をカタカナに変換
 
