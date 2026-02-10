@@ -127,6 +127,10 @@ gradient_monitor: GradientMonitor | None = None
 # グローバル EMA インスタンス
 ema_model: EMAModel | None = None
 
+# 固定評価サンプル: 初回 evaluate() 時にキャッシュし、以降の評価ステップで再利用する
+# 常に同一入力から合成することで、学習進行に伴う品質変化を追跡できる
+_fixed_eval_batch: tuple[Any, ...] | None = None
+
 
 def run():
     paths_config = get_paths_config()
@@ -1413,6 +1417,31 @@ def train_and_evaluate(
                             "loss/g/lm_gen": loss_lm_gen,
                         }
                     )
+
+                # g ベクトルの統計をログに記録
+                # Adapter が出力する g 空間の挙動を監視するためのメトリクス
+                if g is not None:
+                    g_norms = g.detach().squeeze(-1).norm(dim=-1)
+                    scalar_dict["g/norm_mean"] = g_norms.mean()
+                    scalar_dict["g/norm_std"] = g_norms.std()
+
+                    # Adapter 経由の場合: residual 接続の比率を記録
+                    # Adapter 出力と residual のバランスが崩れていないか監視する
+                    if (
+                        use_external_speaker_embedding
+                        and external_speaker_embedding is not None
+                        and hasattr(net_g.module, "ext_spk_adapter")
+                        and net_g.module.ext_spk_adapter is not None
+                    ):
+                        with torch.no_grad():
+                            adapter = net_g.module.ext_spk_adapter
+                            residual = adapter.residual_proj(external_speaker_embedding)
+                            adapter_out = g.detach().squeeze(-1) - residual
+                            residual_ratio = residual.norm(dim=-1).mean() / (
+                                adapter_out.norm(dim=-1).mean() + 1e-8
+                            )
+                            scalar_dict["g/adapter_residual_ratio"] = residual_ratio
+
                 # 以降のログは計算が重い気がするし誰も見てない気がするのでコメントアウト
                 # image_dict = {
                 #     "slice/mel_org": utils.plot_spectrogram_to_numpy(
@@ -1548,6 +1577,7 @@ def evaluate(
     eval_loader: DataLoader[Any],
     writer_eval: SummaryWriter,
 ) -> None:
+    global _fixed_eval_batch
     generator.eval()
     image_dict = {}
     audio_dict = {}
@@ -1558,6 +1588,13 @@ def evaluate(
     )
     with torch.no_grad():
         for batch_idx, batch in enumerate(eval_loader):
+            # 初回の evaluate() 時に最初のバッチを固定サンプルとしてキャッシュ
+            # 以降の評価ステップで常に同一入力から合成し、学習進行に伴う品質変化を追跡する
+            if _fixed_eval_batch is None and batch_idx == 0:
+                _fixed_eval_batch = tuple(
+                    t.clone() if isinstance(t, torch.Tensor) else t for t in batch
+                )
+
             if use_external_speaker_embedding:
                 (
                     x,
@@ -1654,6 +1691,70 @@ def evaluate(
                     }
                 )
                 audio_dict.update({f"gt/audio_{batch_idx}": y[0, :, : y_lengths[0]]})
+
+        # 固定サンプルによる定期合成 (学習進行に伴う品質変化の追跡用)
+        # 常に同一入力から合成することで、ステップ間の品質推移を TensorBoard で聴き比べ可能にする
+        if _fixed_eval_batch is not None:
+            if use_external_speaker_embedding:
+                (
+                    fixed_x,
+                    fixed_x_lengths,
+                    fixed_spec,
+                    fixed_spec_lengths,
+                    fixed_y,
+                    fixed_y_lengths,
+                    fixed_speakers,
+                    fixed_tone,
+                    fixed_language,
+                    fixed_bert,
+                    fixed_style_vec,
+                    fixed_ext_spk_emb,
+                ) = _fixed_eval_batch
+            else:
+                (
+                    fixed_x,
+                    fixed_x_lengths,
+                    fixed_spec,
+                    fixed_spec_lengths,
+                    fixed_y,
+                    fixed_y_lengths,
+                    fixed_speakers,
+                    fixed_tone,
+                    fixed_language,
+                    fixed_bert,
+                    fixed_style_vec,
+                ) = _fixed_eval_batch
+                fixed_ext_spk_emb = None
+            fixed_x = fixed_x.cuda()
+            fixed_x_lengths = fixed_x_lengths.cuda()
+            fixed_spec = fixed_spec.cuda()
+            fixed_spec_lengths = fixed_spec_lengths.cuda()
+            fixed_y = fixed_y.cuda()
+            fixed_y_lengths = fixed_y_lengths.cuda()
+            fixed_speakers = fixed_speakers.cuda()
+            fixed_bert = fixed_bert.cuda()
+            fixed_tone = fixed_tone.cuda()
+            fixed_language = fixed_language.cuda()
+            fixed_style_vec = fixed_style_vec.cuda()
+            if fixed_ext_spk_emb is not None:
+                fixed_ext_spk_emb = fixed_ext_spk_emb.cuda()
+            for use_sdp in [True, False]:
+                y_hat, attn, mask, *_ = generator.module.infer(
+                    fixed_x,
+                    fixed_x_lengths,
+                    fixed_speakers,
+                    fixed_tone,
+                    fixed_language,
+                    fixed_bert,
+                    fixed_style_vec,
+                    y=fixed_spec,
+                    max_len=1000,
+                    sdp_ratio=0.0 if not use_sdp else 1.0,
+                    external_spk_emb=fixed_ext_spk_emb,
+                )
+                y_hat_lengths = mask.sum([1, 2]).long() * hps.data.hop_length
+                audio_dict[f"fixed/audio_{use_sdp}"] = y_hat[0, :, : y_hat_lengths[0]]
+            audio_dict["fixed/gt_audio"] = fixed_y[0, :, : fixed_y_lengths[0]]
 
     summarize(
         writer=writer_eval,
