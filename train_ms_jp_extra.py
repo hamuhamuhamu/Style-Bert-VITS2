@@ -1,27 +1,34 @@
 """
-# 既知の問題点・バグ
+# 既知の問題点・バグ (対応済み)
 ---------------------------------------------------------------------------
-## WavLM Discriminator の Generator 側損失が使用されない問題
-オリジナル Bert-VITS2 の JP-Extra 版から存在するバグ。
-WavLM Discriminator の損失（loss_lm, loss_lm_gen）を計算しても、Generator の学習に反映されない。
+## WavLM Discriminator の Generator 側損失が使用されない問題 (対応済み)
+オリジナル Bert-VITS2 の JP-Extra 版から存在していたバグ。
+WavLM Discriminator の損失（loss_lm, loss_lm_gen）を計算しても、Generator の学習に反映されなかった。
 Duration Discriminator を意図的に無効化した際に、WavLM 損失の条件分岐が連動して無効になることが見落とされていたと推測される。
 現在の事前学習モデルのベースである Bert-VITS2 時代からこの状態で学習されていたと思われる。
 
 原因は、WavLM 損失を loss_gen_all に加算する処理が、
-Duration Discriminator の条件分岐 `if net_dur_disc is not None:` の内部にネストされていること。
+Duration Discriminator の条件分岐 `if net_dur_disc is not None:` の内部にネストされていたこと。
 JP-Extra のデフォルト設定では `use_duration_discriminator: false` のため、
-この条件分岐に入らず、WavLM 損失が計算されても使用されない。
+この条件分岐に入らず、WavLM 損失が計算されても使用されなかった。
 
-これにより、WavLM モデルのロード、forward pass、損失計算がすべて無駄になり、
-数百 MB のメモリと計算時間を消費するにもかかわらず、学習に一切寄与しない状態だった。
-また TensorBoard には loss_lm, loss_lm_gen が記録されるが、実際には使われていなかった。
+これにより、WavLM Discriminator を有効にしていても Discriminator 側だけが鍛えられるだけで、
+Generator は WavLM 損失を一切受け取れず、WavLM は学習に寄与しない状態だった。
+にもかかわらず WavLM モデルのロード・forward pass・損失計算で数百 MB のメモリと計算時間を消費していた。
+また TensorBoard には loss_lm, loss_lm_gen が記録されるが、実際には Generator の学習に使われていなかった。
 
-このコードでは、デフォルト設定で `use_wavlm_discriminator: false` に変更し、
-WavLM 関連のリソース消費を削減した。
-Generator の学習結果は従来と完全に等価である（どちらも WavLM 損失は使われない）。
+### このコードでの対応
+1. **ネストバグの修正**: WavLM 損失の加算を Duration Discriminator の条件分岐から独立させ、
+   Duration Discriminator / WavLM Discriminator を個別に有効/無効化できるようにした。
+2. **デフォルト設定の変更**: `use_wavlm_discriminator: false` に変更し、WavLM 関連のリソース消費を削減した。
+   事前学習モデルの Generator は WavLM 損失を使用せずに学習されていたため、
+   Generator の学習結果は従来と完全に等価である。
 
-将来的に WavLM 損失を正しく使用したい場合は、WavLM 損失の加算を Duration Discriminator の条件分岐から独立させる必要がある。
-ただし、既存の事前学習モデルは WavLM 損失なしで学習されているため、ファインチューニング時に有効化すると学習が不安定になる可能性がある。
+### WavLM を無効のままとする理由
+事前学習モデルは WavLM なしで学習されたにもかかわらず、十分に高品質な音声を生成できている。
+WavLM を有効化して学習に組み込むには JP-Extra ベースモデルの再学習が必要となる大変更になるため、
+現時点では WavLM は存在しなかったものとして扱い、config.json で無効化している。
+将来的に WavLM を導入する可能性は完全には排除しないが、積極的に予定はしていない。
 """
 
 from __future__ import annotations
