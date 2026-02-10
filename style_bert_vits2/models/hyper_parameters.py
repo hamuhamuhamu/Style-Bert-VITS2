@@ -99,7 +99,7 @@ class HyperParametersModel(BaseModel):
     use_spectral_norm: bool = False
     gin_channels: int = 512
     use_external_speaker_adapter: bool = False
-    external_speaker_embedding_dim: int = 256
+    external_speaker_embedding_dim: int = 192
     external_speaker_adapter_hidden_dim: int = 512
     slm: HyperParametersModelSLM = HyperParametersModelSLM()
 
