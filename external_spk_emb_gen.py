@@ -80,6 +80,13 @@ def main() -> None:
 
         embedding = model.get_embedding(audio_path)
         embedding = np.asarray(embedding, dtype=np.float32).reshape(-1)
+
+        # L2 正規化: embedding のノルムを 1 に揃える
+        # ノルムがばらつくと Adapter の学習が不安定になるため、事前に正規化して保存する
+        embedding_norm = np.linalg.norm(embedding)
+        if embedding_norm > 0:
+            embedding = embedding / embedding_norm
+
         output_path.parent.mkdir(parents=True, exist_ok=True)
         np.save(output_path, embedding)
 
