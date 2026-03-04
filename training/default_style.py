@@ -31,6 +31,9 @@ def save_neutral_vector(
         xvec = np.load(file)
         embs.append(np.expand_dims(xvec, axis=0))
 
+    if len(embs) == 0:
+        raise ValueError(f"No .npy files found in wav_dir: {wav_dir}")
+
     x = np.concatenate(embs, axis=0)  # (N, 256)
     mean = np.mean(x, axis=0)  # (256,)
     only_mean = np.stack([mean])  # (1, 256)
@@ -85,6 +88,8 @@ def save_styles_by_dirs(
     for file in wav_dir.rglob("*.npy"):
         xvec = np.load(file)
         embs.append(np.expand_dims(xvec, axis=0))
+    if len(embs) == 0:
+        raise ValueError(f"No .npy files found in wav_dir: {wav_dir}")
     x = np.concatenate(embs, axis=0)  # (N, 256)
     mean = np.mean(x, axis=0)  # (256,)
     style_vectors: list[np.ndarray] = [mean]

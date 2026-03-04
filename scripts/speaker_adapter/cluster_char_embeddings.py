@@ -555,7 +555,19 @@ def _plot_cluster_scatter_tsne(
 
     matplotlib.use("Agg")
 
-    reducer = TSNE(n_components=2, random_state=seed, metric="cosine")
+    n_samples = embeddings.shape[0]
+    if n_samples <= 1:
+        logger.warning(
+            f"Skipping t-SNE plot because at least 2 samples are required. Found: {n_samples}"
+        )
+        return
+    perplexity = min(30, max(1, n_samples - 1))
+    reducer = TSNE(
+        n_components=2,
+        random_state=seed,
+        metric="cosine",
+        perplexity=perplexity,
+    )
     embeddings_2d = reducer.fit_transform(embeddings)
 
     fig, ax = plt.subplots(figsize=(10, 8))

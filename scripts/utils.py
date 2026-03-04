@@ -62,8 +62,10 @@ def save_benchmark_audio(
 
         output_path = output_dir / filename
 
-        # 16bit 整数に変換してWAVファイルとして保存
-        audio_int16 = (audio_data * 32767).astype(np.int16)
+        # 16bit 整数に変換して WAV ファイルとして保存
+        # 浮動小数が [-1.0, 1.0] を超える場合のオーバーフローを防ぐため事前にクリップする
+        clipped_audio_data = np.clip(audio_data, -1.0, 1.0)
+        audio_int16 = (clipped_audio_data * 32767).astype(np.int16)
         wavfile.write(str(output_path), sample_rate, audio_int16)
 
         # ファイル保存成功をログ出力

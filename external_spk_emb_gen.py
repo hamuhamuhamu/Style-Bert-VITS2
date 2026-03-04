@@ -33,9 +33,9 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _iter_audio_paths(list_path: Path) -> list[str]:
+def get_audio_paths(list_path: Path) -> list[str]:
     """
-    train.list から音声パスを取得する。
+    list ファイルから音声パスを取得する。
 
     Args:
         list_path (Path): list ファイルのパス
@@ -43,6 +43,10 @@ def _iter_audio_paths(list_path: Path) -> list[str]:
     Returns:
         list[str]: 音声ファイルのパス
     """
+
+    if not list_path.exists():
+        logger.warning(f"List file not found. Skipping: {list_path}")
+        return []
 
     entries = load_filepaths_and_text(list_path)
     audio_paths = []
@@ -64,8 +68,8 @@ def main() -> None:
 
     # train.list と val.list から音声パスを取得
     audio_paths: list[str] = []
-    audio_paths.extend(_iter_audio_paths(paths.train_list_path))
-    audio_paths.extend(_iter_audio_paths(paths.val_list_path))
+    audio_paths.extend(get_audio_paths(paths.train_list_path))
+    audio_paths.extend(get_audio_paths(paths.val_list_path))
 
     if len(audio_paths) == 0:
         raise ValueError("No audio paths found in list files.")

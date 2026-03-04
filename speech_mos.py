@@ -182,8 +182,8 @@ def _generate_audio_files(
     audio_paths: list[Path] = []
     for index, text in enumerate(texts):
         sampling_rate, audio = tts_model.infer(text)
-        audio = audio.astype("float32")
-        audio = TTSModel.convert_to_16_bit_wav(audio)
+        if audio.dtype != np.int16:
+            audio = TTSModel.convert_to_16_bit_wav(audio)
         output_path = audio_dir / f"{index:04d}.wav"
         wavfile.write(output_path, sampling_rate, audio)
         audio_paths.append(output_path)
@@ -366,7 +366,6 @@ def _save_plot(
     plt.legend(loc="upper left", bbox_to_anchor=(1, 1))
     plt.tight_layout()
     plt.savefig(output_path)
-    plt.show()
 
 
 def main() -> None:

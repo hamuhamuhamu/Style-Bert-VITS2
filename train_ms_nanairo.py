@@ -710,7 +710,7 @@ def run():
     # NOTE: GradScaler は本来 FP16 (AMP) 用であり、BF16 では不要
     ## BF16 は FP32 と同じ動的レンジを持つため、勾配スケーリングは必要ない
     ## ただし、enabled=False で初期化すれば害はないため、現状維持としている
-    scaler = GradScaler(device="cuda", enabled=hps.train.bf16_run)
+    scaler = GradScaler(device="cuda", enabled=not hps.train.bf16_run)
     logger.info("Start training.")
 
     diff = abs(

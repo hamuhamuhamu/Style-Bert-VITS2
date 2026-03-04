@@ -530,12 +530,17 @@ def set_flow_chunk_size(net_g: torch.nn.Module, chunk_size: int) -> None:
 
     if not hasattr(net_g, "flow"):
         return
+
     flow_module = getattr(net_g, "flow")
-    if isinstance(
-        flow_module,
-        (models.TransformerCouplingBlock, models_jp_extra.TransformerCouplingBlock),
-    ):
-        setattr(flow_module, "_chunk_size", chunk_size)
+    for module in flow_module.modules():
+        if isinstance(
+            module,
+            (
+                models.TransformerCouplingBlock,
+                models_jp_extra.TransformerCouplingBlock,
+            ),
+        ):
+            setattr(module, "_chunk_size", chunk_size)
 
 
 def run_experiment_flow_chunk(
@@ -580,7 +585,7 @@ def run_experiment_flow_chunk(
 
         # 比較するチャンクサイズの候補
         chunk_sizes = [1024, 768, 512]
-        baseline_wave: NDArray[Any] | None = None
+        baseline_waves: list[NDArray[Any]] | None = None
 
         for idx, chunk_size in enumerate(chunk_sizes):
             set_flow_chunk_size(net_g, chunk_size)
@@ -600,11 +605,11 @@ def run_experiment_flow_chunk(
 
             # 最初のチャンクサイズを基準として波形差分を計算する
             if idx == 0:
-                baseline_wave = waves[0]
-            if baseline_wave is not None:
+                baseline_waves = list(waves)
+            if baseline_waves is not None:
                 for wave_idx, m in enumerate(metrics_list):
                     max_abs_diff, mean_abs_diff = compute_waveform_diff(
-                        baseline_wave,
+                        baseline_waves[wave_idx],
                         waves[wave_idx],
                     )
                     m.max_abs_diff = max_abs_diff

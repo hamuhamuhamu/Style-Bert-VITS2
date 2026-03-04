@@ -124,6 +124,13 @@ def compute_cosine_similarity_batch(
     features1: list[NDArray[np.float32]], features2: list[NDArray[np.float32]]
 ) -> list[float]:
     """複数の特徴量ペアのコサイン類似度を計算する。"""
+
+    if len(features1) != len(features2):
+        raise ValueError(
+            "Feature list lengths must match. "
+            f"features1: {len(features1)}, features2: {len(features2)}"
+        )
+
     similarities = []
     for f1, f2 in zip(features1, features2):
         vec1_flat = f1.flatten()

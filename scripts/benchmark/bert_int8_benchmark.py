@@ -366,9 +366,7 @@ def run_benchmark(
             }
 
         except Exception as ex:
-            logger.exception(
-                f"BERT設定 '{config['name']}' でエラーが発生しました: {ex}"
-            )
+            logger.exception(f"BERT設定 '{config['name']}' でエラーが発生しました:")
             continue
 
     # TTS モデルをアンロード

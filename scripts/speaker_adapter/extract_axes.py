@@ -222,8 +222,17 @@ def main() -> None:
 
     rng = np.random.default_rng(args.seed)
     indices = np.arange(g_matrix.shape[0])
+    if len(indices) < 2:
+        raise ValueError(
+            "At least 2 samples are required for train/val split. "
+            f"Found: {len(indices)}"
+        )
+    if args.val_ratio <= 0 or args.val_ratio >= 1:
+        raise ValueError(
+            f"val_ratio must be in the range (0, 1). Current value: {args.val_ratio}"
+        )
     rng.shuffle(indices)
-    val_count = int(len(indices) * args.val_ratio)
+    val_count = max(1, min(len(indices) - 1, int(len(indices) * args.val_ratio)))
     val_indices = indices[:val_count]
     train_indices = indices[val_count:]
 

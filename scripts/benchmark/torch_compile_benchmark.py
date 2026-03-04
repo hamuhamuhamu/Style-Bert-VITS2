@@ -358,7 +358,8 @@ def run_torch_compile_benchmark(
 
             # torch.compile を適用
             compile_time_ms = 0.0
-            if compile_mode is not None or compile_backend is not None:
+            is_compile_enabled = compile_mode is not None or compile_backend is not None
+            if is_compile_enabled:
                 backend_info = (
                     f"backend: {compile_backend}"
                     if compile_backend
@@ -411,6 +412,10 @@ def run_torch_compile_benchmark(
             if device.startswith("cuda"):
                 torch.cuda.synchronize()
             warmup_time_ms = (time.perf_counter() - warmup_start) * 1000
+            if is_compile_enabled is True:
+                # torch.compile は初回実行時にコンパイルされるため、
+                # warmup 時間を compile_time として記録する。
+                compile_time_ms = warmup_time_ms
 
             # 本番測定
             print(f"本番測定実行中 ({num_runs} 回)...")

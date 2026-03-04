@@ -359,10 +359,11 @@ def main() -> None:
                 [(token_index % 2) == 0 for token_index in range(token_count)],
                 dtype=bool,
             )
-            is_inserted_blank: NDArray[np.bool_] = (
-                is_add_blank_enabled and is_pad_id & is_even_index  # type: ignore[operator]
+            is_inserted_blank: NDArray[np.bool_] = np.logical_and(
+                is_add_blank_enabled,
+                is_pad_id & is_even_index,
             )
-            is_original_pad: NDArray[np.bool_] = is_pad_id & ~is_inserted_blank  # type: ignore[operator]
+            is_original_pad: NDArray[np.bool_] = is_pad_id & ~is_inserted_blank
             is_punctuation: NDArray[np.bool_] = np.array(
                 [symbol in PUNCTUATIONS for symbol in token_symbols],
                 dtype=bool,

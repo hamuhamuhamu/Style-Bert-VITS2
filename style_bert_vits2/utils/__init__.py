@@ -51,7 +51,7 @@ def get_onnx_device_options(
         onnx_providers (Sequence[str | tuple[str, dict[str, Any]]]): ExecutionProvider のリスト
 
     Returns:
-        tuple[str, int, onnxruntime.RunOptions]: 入力テンソルの転送に使用するデバイス種別, デバイス ID, 実行オプション
+        tuple[str, int, Any]: 入力テンソルの転送に使用するデバイス種別, デバイス ID, 実行オプション
     """
 
     # ONNX セッションに対応する SessionOptions を取得

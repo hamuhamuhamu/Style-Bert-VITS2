@@ -103,7 +103,7 @@ def plot_spectrogram_to_numpy(spectrogram: NDArray[Any]) -> NDArray[Any]:
     plt.tight_layout()
 
     fig.canvas.draw()
-    data = np.fromstring(fig.canvas.tostring_rgb(), dtype=np.uint8, sep="")  # type: ignore
+    data = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)  # type: ignore
     data = data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
     plt.close()
     return data
@@ -146,7 +146,7 @@ def plot_alignment_to_numpy(
     plt.tight_layout()
 
     fig.canvas.draw()
-    data = np.fromstring(fig.canvas.tostring_rgb(), dtype=np.uint8, sep="")  # type: ignore
+    data = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)  # type: ignore
     data = data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
     plt.close()
     return data
@@ -205,9 +205,8 @@ def get_logger(
         logging.Logger: ロガー
     """
 
-    global logger
-    logger = logging.getLogger(os.path.basename(model_dir_path))
-    logger.setLevel(logging.DEBUG)
+    file_logger = logging.getLogger(os.path.basename(model_dir_path))
+    file_logger.setLevel(logging.DEBUG)
 
     formatter = logging.Formatter("%(asctime)s\t%(name)s\t%(levelname)s\t%(message)s")
     if not os.path.exists(model_dir_path):
@@ -215,8 +214,8 @@ def get_logger(
     h = logging.FileHandler(os.path.join(model_dir_path, filename))
     h.setLevel(logging.DEBUG)
     h.setFormatter(formatter)
-    logger.addHandler(h)
-    return logger
+    file_logger.addHandler(h)
+    return file_logger
 
 
 def get_steps(model_path: str | Path) -> int | None:

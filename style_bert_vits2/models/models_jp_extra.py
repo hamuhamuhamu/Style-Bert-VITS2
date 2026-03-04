@@ -67,7 +67,7 @@ class DurationDiscriminator(nn.Module):  # vits2
         g: torch.Tensor | None = None,
     ) -> list[torch.Tensor]:
         x = torch.detach(x)
-        if g is not None:
+        if g is not None and hasattr(self, "cond"):
             g = torch.detach(g)
             x = commons.auto_inplace_add(x, self.cond(g))
         x = self.conv_1(x * x_mask)
@@ -291,7 +291,7 @@ class StochasticDurationPredictor(nn.Module):
     ) -> torch.Tensor:
         x = torch.detach(x)
         x = self.pre(x)
-        if g is not None:
+        if g is not None and hasattr(self, "cond"):
             g = torch.detach(g)
             x = commons.auto_inplace_add(x, self.cond(g))
         x = self.convs(x, x_mask)
@@ -385,7 +385,7 @@ class DurationPredictor(nn.Module):
         self, x: torch.Tensor, x_mask: torch.Tensor, g: torch.Tensor | None = None
     ) -> torch.Tensor:
         x = torch.detach(x)
-        if g is not None:
+        if g is not None and hasattr(self, "cond"):
             g = torch.detach(g)
             x = commons.auto_inplace_add(x, self.cond(g))
         x = self.conv_1(x * x_mask)
@@ -658,7 +658,7 @@ class Generator(torch.nn.Module):
 
     def forward(self, x: torch.Tensor, g: torch.Tensor | None = None) -> torch.Tensor:
         x = self.conv_pre(x)
-        if g is not None:
+        if g is not None and hasattr(self, "cond"):
             x = commons.auto_inplace_add(x, self.cond(g))
 
         for i in range(self.num_upsamples):
@@ -1010,6 +1010,7 @@ class SynthesizerTrn(nn.Module):
         self.mas_noise_scale_initial = kwargs.get("mas_noise_scale_initial", 0.01)
         self.noise_scale_delta = kwargs.get("noise_scale_delta", 2e-6)
         self.current_mas_noise_scale = self.mas_noise_scale_initial
+        self.enc_gin_channels = 0
         if self.use_spk_conditioned_encoder and gin_channels > 0:
             self.enc_gin_channels = gin_channels
         self.enc_p = TextEncoder(
@@ -1244,6 +1245,7 @@ class SynthesizerTrn(nn.Module):
         # durations_frames_override が指定された場合、指定されたトークンのみ duration を上書きする
         if durations_frames_override is not None:
             override = durations_frames_override
+            original_is_floating_point = override.is_floating_point()
             if override.dim() == 1:
                 override = override.unsqueeze(0).unsqueeze(0)
             elif override.dim() == 2:
@@ -1279,12 +1281,12 @@ class SynthesizerTrn(nn.Module):
             else:
                 # mask が省略された場合、NaN 以外を上書き対象とみなす (float のみ)
                 # それ以外の型では、0 より大きい値のみを上書き対象とみなす
-                if override.is_floating_point():
+                if original_is_floating_point is True:
                     mask = ~torch.isnan(override)
                 else:
                     mask = override > 0
 
-            if override.is_floating_point():
+            if original_is_floating_point is True:
                 invalid_value_mask = ~torch.isfinite(override)
                 if torch.any(invalid_value_mask & mask):
                     raise ValueError("durations_frames_override must be finite")

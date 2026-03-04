@@ -859,19 +859,19 @@ class DistributedBucketSampler(DistributedSampler[int]):
             int: バケットインデックス（見つからない場合は -1）
         """
 
+        boundaries = self.boundaries
         if hi is None:
-            hi = len(self.boundaries) - 1
+            hi = len(boundaries) - 1
 
-        if hi > lo:
-            mid = (hi + lo) // 2
-            if self.boundaries[mid] < x and x <= self.boundaries[mid + 1]:
+        while hi > lo:
+            mid = (lo + hi) // 2
+            if boundaries[mid] < x and x <= boundaries[mid + 1]:
                 return mid
-            elif x <= self.boundaries[mid]:
-                return self._bisect(x, lo, mid)
+            if x <= boundaries[mid]:
+                hi = mid
             else:
-                return self._bisect(x, mid + 1, hi)
-        else:
-            return -1
+                lo = mid + 1
+        return -1
 
     def __len__(self) -> int:
         """

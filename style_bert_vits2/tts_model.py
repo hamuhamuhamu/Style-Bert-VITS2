@@ -409,7 +409,7 @@ class TTSModel:
             force_reload_model (bool, optional): モデルを強制的に再ロードするかどうか. Defaults to False.
 
         Returns:
-            TokenDurationsResult: 予測されたトークンの長さ（メルフレーム数）を秒単位で返す
+            TokenDurationsResult: 予測されたトークンの長さ（メルフレーム数）を返す（`length_scale=1.0` 基準）
         """
 
         logger.info(f"Start predicting token durations from text:\n{text}")

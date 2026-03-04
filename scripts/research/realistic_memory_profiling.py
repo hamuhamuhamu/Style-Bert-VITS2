@@ -396,7 +396,7 @@ def analyze_results(
     ]
 
     # OOMエラーの発生を検出
-    oom_occurrences = [r for r in results if r["inference_time"] < 0]
+    oom_occurrences = [r for r in results if r.get("inference_time") in (-1, -1.0)]
 
     # テキスト長別の統計
     text_length_stats = {}
