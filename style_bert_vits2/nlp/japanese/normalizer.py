@@ -321,16 +321,16 @@ __ADDRESS_STANDALONE_3PART_WITH_ROOM_PATTERN = re.compile(
 __ROOM_NUMBER_GOUSHITSU_PATTERN = re.compile(r"(?<!\d)(\d{3,4})号室")
 # 「号」パターン: 文脈が住所・建物であると判断できる場合のみ変換
 __ROOM_NUMBER_GOU_PATTERN = re.compile(r"(?<!\d)(\d{3,4})号(?!室)")
-# 号の文脈判定に使う「住所らしさ」パターン
+# 号の文脈判定に使う「明示的な住所語彙」パターン
 # 単独の行政区画漢字（都/道/府/県/市/区/町/村）は「市場」「区別」「北海道」等の
-# 非住所語でも頻繁にマッチするため除外し、明示的な住所語彙のみ残す
-__ADDRESS_CONTEXT_PATTERN = re.compile(
-    r"(?:"
-    r"\d+(?:-|の)\d+(?:(?:-|の)\d+){1,2}"  # 3~4要素: 1-2-3, 1の2の3の4
-    r"|\d+の\d+"  # 2要素の「の」区切り（step 4 変換後の住所: 588の15 等）
-    # ハイフン区切りの2要素（3-5 等）は非住所でも頻出するため含めない
-    r"|丁目|番地"  # 明示的な住所語彙
-    r")"
+# 非住所語でも頻繁にマッチするため除外し、明示的な語彙のみを対象とする
+__ADDRESS_EXPLICIT_CONTEXT_PATTERN = re.compile(
+    r"(?:住所|所在地|住居表示|宛先|送付先|丁目|番地|地番)"
+)
+# 号の文脈判定に使う「行政区画名」パターン
+# 「神奈川県」「川崎市」「幸区」など、接尾辞付きの地名を検出する
+__ADDRESS_ADMINISTRATIVE_NAME_PATTERN = re.compile(
+    r"[\u3400-\u4DBF\u4E00-\u9FFF々〆ヶ]{1,16}(?:都|道|府|県|市|区|町|村)"
 )
 # 「1番2」「1番地2」「543番21」などの番地表記を検出するパターン
 __ADDRESS_JP_NUMBERING_PATTERN = re.compile(r"\d+番(?:地)?(?:\d+)?(?:-\d+)?")
@@ -340,11 +340,54 @@ __ADDRESS_BLOCK_PATTERN = re.compile(r"\d+(?:-|の)\d+(?:(?:-|の)\d+){1,2}")
 # \u200c は __normalize_phone_postal_address_floor() 内のマーカー文字で、
 # 住所変換後に挿入されるため、このパターンでも許容する必要がある
 __ADDRESS_TO_ROOM_TAIL_ALLOWED_PATTERN = re.compile(
-    r"[\u200c \u3000A-Za-z0-9\u3040-\u30FF\u3400-\u9FFF々〆ヶノの・ー第\-]{0,64}"
+    r"[\u200c\u200d \u3000A-Za-z0-9\u3040-\u30FF\u3400-\u9FFF々〆ヶノの・ー第\-]{0,64}"
 )
+# マーカー後テキストの厳格検証パターン
+# 住所変換マーカー以降のテキストが建物名相当かどうかを判定する
+# ひらがな（「の」以外）を含むテキストは助詞（で・に・を・が・は 等）を含む
+# 文構造を持つ可能性が高いため、住所文脈として扱わない
+## 例: 「パークハイムの受付で」→ 文構造あり（「で」が助詞）→ マッチしない
+## 例: 「パークハイム鹿島田スカイタワー」→ 建物名のみ → マッチする
+## 例: 「パークタワーの丘」→ 「の」のみ許容 → マッチする
+__ADDRESS_MARKER_TAIL_PATTERN = re.compile(
+    r"[\u200c\u200d \u3000A-Za-z0-9\u30A0-\u30FF\u3400-\u9FFF々〆ヶの・ー第\-]{0,64}"
+)
+# 「数字 + マーカー + スペース + 数字」を検出するパターン
+# __normalize_phone_postal_address_floor() 内で住所/郵便番号/電話番号の直後スペースに
+# マーカー（\u200c, \u200d）を使うため、この段階で数字連結防止の ' を入れる
+__DIGIT_MARKER_SPACE_DIGIT_PATTERN = re.compile(r"(\d)[\u200c\u200d][ \u3000]+(\d)")
+# マーカー + スペース（半角/全角）を検出するパターン
+__MARKER_SPACE_PATTERN = re.compile(r"[\u200c\u200d][ \u3000]+")
 # 号の文脈判定に使う建物名キーワード
+# 建物の種別を表す一般語と、大手デベロッパーのブランド名を網羅する
+## 一般語: マンション名・ビル名に頻出する種別キーワード
+## ブランド名: 野村不動産(プラウド)・東急不動産(ブランズ)・東京建物(ブリリア)・
+##   大和ハウス(プレミスト)・NTT都市開発(ウエリス)・日鉄興和(リビオ)・
+##   伊藤忠都市開発(クレヴィア)・タカラレーベン(レーベン)・長谷工(ブランシエラ)・
+##   コスモスイニシア(イニシア)・マリモ(ポレスター)・相鉄(グレーシア)・
+##   小田急(リーフィア)・長谷工(オハナ)・旭化成(アトラス)・ゴールドクレスト(クレスト)・
+##   三井不動産(パークホームズ/パークタワー/パークシティ/パークコート/
+##     パークリュクス/パークアクシス/ファインコート)・
+##   三菱地所(パークハウス/ザ・パークハウス)・住友不動産(シティハウス/シティタワー/
+##     シティテラス/グランドヒルズ)・大京(ライオンズ)
 __BUILDING_NAME_PATTERN = re.compile(
-    r"(?:マンション|ハイツ|コーポ|レジデンス|アパート|ビル|タワー|荘|コート|ハイム|邸|館|棟)"
+    r"(?:"
+    # 一般的な建物種別キーワード
+    r"マンション|ハイツ|コーポ|レジデンス|アパート|ビル|タワー|荘|コート|ハイム|邸|館|棟"
+    r"|ハウス|テラス|ヒルズ|パレス|シャトー|メゾン|ヴィラ|フラット"
+    r"|プラザ|スクエア|カーサ|ホームズ|寮|苑|ガーデン|フォレスト"
+    # 大手デベロッパーのブランド名
+    r"|プラウド|ブランズ|ブリリア|プレミスト|ウエリス|リビオ|クレヴィア"
+    r"|レーベン|ブランシエラ|イニシア|ポレスター|グレーシア|リーフィア"
+    r"|オハナ|アトラス|クレスト|ライオンズ"
+    # 三井不動産ブランド
+    r"|パークホームズ|パークタワー|パークシティ|パークコート"
+    r"|パークリュクス|パークアクシス|ファインコート"
+    # 三菱地所ブランド
+    r"|パークハウス"
+    # 住友不動産ブランド
+    r"|シティハウス|シティタワー|シティテラス|グランドヒルズ"
+    r")"
 )
 # 号室パターン（暗黙的）: カタカナの直後の3桁以上の数字（号室/号なし）
 # 「石田ハイツ101」のようにカタカナ建物名の直後に部屋番号が来るケース
@@ -1329,16 +1372,6 @@ def __normalize_phone_postal_address_floor(text: str) -> str:
 
         context = prefix_text[-160:]
 
-        # 住所ブロック（例: 1-2-3, 1の2の3）を文脈中から探索し、
-        # その後ろに建物名相当のテキストを最大64文字まで許容する。
-        # これにより「... 1-34-5 パークハイム鹿島田第一 204号」のように、
-        # 住所と号の間に建物名が挟まるケースでも住所文脈として判定できる。
-        # 文境界チェック不要: tail_text に「。」等が含まれると fullmatch が失敗するため
-        for address_block_match in __ADDRESS_BLOCK_PATTERN.finditer(context):
-            tail_text = context[address_block_match.end() :]
-            if __ADDRESS_TO_ROOM_TAIL_ALLOWED_PATTERN.fullmatch(tail_text) is not None:
-                return True
-
         # 以降のチェックは文境界以降の近傍コンテキストのみで判定する
         # これにより「住所文脈。非住所の号」のようなケースで住所文脈が波及しない
         # 本関数は __replace_symbols() 内から呼び出され、replace_punctuation() よりも先に実行される
@@ -1356,12 +1389,55 @@ def __normalize_phone_postal_address_floor(text: str) -> str:
         # 文境界が見つかった場合はそれ以降のみ、見つからなければ全体を使用
         nearby_context = context[last_boundary + 1 :] if last_boundary >= 0 else context
 
-        # 「丁目」「番地」の明示的な住所語彙、または住所数字パターン
-        if __ADDRESS_CONTEXT_PATTERN.search(nearby_context) is not None:
+        # 住所変換済みマーカーは同一文内でのみ有効とする
+        # マーカー以降のテキストが建物名相当（カタカナ・漢字・「の」のみ）かどうかを
+        # 厳格パターンで検証し、助詞を含む文構造テキストは住所文脈として扱わない
+        ## 例: 「赤坂1-2-3 パークハイム 309号」→ マーカー後が建物名 → 住所文脈
+        ## 例: 「赤坂1-2-3 パークハイムの受付で309号の書類」→ 「の受付で」に助詞「で」→ 非住所
+        ## 例: 「試合結果5-3-2 309号」→ マーカー後が空白のみ → フォールバック判定
+        if _ADDRESS_MARKER in nearby_context:
+            marker_index = nearby_context.rfind(_ADDRESS_MARKER)
+            text_after_marker = nearby_context[marker_index + 1 :]
+            # マーカー後にテキストがある場合、建物名らしいテキストかを検証する
+            # ひらがな（「の」以外の助詞 で・に・を・が・は 等）を含むテキストは
+            # 文構造を持つと判断し、住所文脈としない
+            if text_after_marker.strip() != "":
+                if (
+                    __ADDRESS_MARKER_TAIL_PATTERN.fullmatch(text_after_marker)
+                    is not None
+                ):
+                    return True
+            else:
+                # マーカー直後にテキストがない場合（例: 「赤坂1-2-3 409号」）
+                # 明示的な住所語彙や行政区画名が近傍にあれば住所文脈とみなす
+                if (
+                    __ADDRESS_EXPLICIT_CONTEXT_PATTERN.search(nearby_context)
+                    is not None
+                ):
+                    return True
+                if (
+                    __ADDRESS_ADMINISTRATIVE_NAME_PATTERN.search(nearby_context)
+                    is not None
+                ):
+                    return True
+
+        # 「住所」「所在地」「丁目」「番地」などの明示的な住所語彙
+        if __ADDRESS_EXPLICIT_CONTEXT_PATTERN.search(nearby_context) is not None:
             return True
         # 「543番21」等の番地表記
         if __ADDRESS_JP_NUMBERING_PATTERN.search(nearby_context) is not None:
             return True
+
+        # 住所ブロック（例: 1-2-3, 1の2の3）を文脈中から探索し、
+        # その前方に明示的な住所語彙があり、かつ後方が建物名相当テキストのみの場合に
+        # 住所文脈とみなす。単なる「バージョン1-2-3 beta」のような非住所は除外する。
+        for address_block_match in __ADDRESS_BLOCK_PATTERN.finditer(nearby_context):
+            head_text = nearby_context[: address_block_match.start()]
+            tail_text = nearby_context[address_block_match.end() :]
+            if __ADDRESS_TO_ROOM_TAIL_ALLOWED_PATTERN.fullmatch(tail_text) is None:
+                continue
+            if __ADDRESS_EXPLICIT_CONTEXT_PATTERN.search(head_text) is not None:
+                return True
 
         # 建物名キーワード（タワー、ビル、館 等）は号の直近でのみ有効とする
         # 「マンション205号」→変換、「東京タワーの入場券309号」→変換しない
@@ -1377,11 +1453,13 @@ def __normalize_phone_postal_address_floor(text: str) -> str:
 
         return False
 
-    # マーカー文字: 電話番号・郵便番号・住所の変換結果の末尾に付加する
+    # マーカー文字: 電話番号・郵便番号の変換結果の末尾に付加する
     # マーカーの直後にある半角スペースをカンマに変換し、残ったマーカーは削除する
     # これにより「郵便番号...ニー 茨城県」→「郵便番号...ニー,茨城県」のようにポーズが入る
     # 一方「マルマルビル 13F」のようなカタカナ建物名の後のスペースは変換されない
     _MARKER = "\u200c"
+    # 住所変換専用マーカー: 号/号室 判定で住所文脈の強い証拠として利用する
+    _ADDRESS_MARKER = "\u200d"
 
     # 0. ハイフンの変種のうち、数字セパレータとして使われるもののみ半角ハイフンに正規化する
     # jaconv.z2h() では変換されないハイフン変種が残っている場合があるため、
@@ -1437,12 +1515,18 @@ def __normalize_phone_postal_address_floor(text: str) -> str:
         part3 = match.group(4)  # 3要素目（オプション）
         part4 = match.group(5)  # 4要素目（オプション: 部屋番号候補）
         result = convert_address_parts(part1, part2, part3, part4)
-        return f"{kanji}{result}{_MARKER}"
+        return f"{kanji}{result}{_ADDRESS_MARKER}"
 
     text = __ADDRESS_PATTERN.sub(convert_address, text)
 
     # 5a. 市区町村名などを省略した住所（3要素 + 空白 + 号室）を処理する
     def convert_standalone_3part_with_room(match: re.Match[str]) -> str:
+        # 先頭位置の standalone（例: "2-11-3 309号"）は住所省略入力として許容する。
+        # それ以外は住所文脈がある場合のみ変換し、
+        # 「試合結果5-3-2 309号」のような非住所文での誤変換を防ぐ。
+        if match.start() > 0 and has_address_context(text[: match.start()]) is False:
+            return match.group(0)
+
         part1 = match.group(1)
         part2 = match.group(2)
         part3 = match.group(3)
@@ -1456,7 +1540,7 @@ def __normalize_phone_postal_address_floor(text: str) -> str:
                 room_number,
                 room_suffix=room_suffix,
             )
-            + _MARKER
+            + _ADDRESS_MARKER
         )
 
     text = __ADDRESS_STANDALONE_3PART_WITH_ROOM_PATTERN.sub(
@@ -1513,8 +1597,12 @@ def __normalize_phone_postal_address_floor(text: str) -> str:
     # 8. マーカーの直後にある半角スペースをカンマに変換する
     # これにより TTS で「郵便番号...ニー,茨城県」のようにポーズが入り自然な読み上げになる
     # ビル名の直後のスペース等はマーカーがないため変換されず、replace_punctuation() で消える
-    text = text.replace(f"{_MARKER} ", ",")
+    # 数字 + マーカー + スペース + 数字 は、後段で数字が連結されないよう先に ' に変換する
+    # 例: 「試合結果5の3の2 309号」相当の内部表現 -> 「試合結果5の3の2'309号」
+    text = __DIGIT_MARKER_SPACE_DIGIT_PATTERN.sub(r"\1'\2", text)
+    text = __MARKER_SPACE_PATTERN.sub(",", text)
     text = text.replace(_MARKER, "")
+    text = text.replace(_ADDRESS_MARKER, "")
 
     return text
 
