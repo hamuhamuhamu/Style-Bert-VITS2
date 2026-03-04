@@ -296,20 +296,55 @@ __POSTAL_CODE_WITH_SYMBOL_PATTERN = re.compile(r"〒\s*(\d{3})-(\d{4})")
 __POSTAL_CODE_PATTERN = re.compile(r"(?<!\d)(?<!\d-)(\d{3})-(\d{4})(?!\d)(?!-\d)")
 # 住所パターン: 漢字地名の直後の「数字-数字(-数字)(-数字)」
 # CJK 統合漢字 + CJK 統合漢字拡張A の直後にマッチ
-# ただし時間・日付関連の漢字（年月日時分秒）の直後は除外
-__ADDRESS_NON_PLACE_KANJI = set("年月日時分秒")
+# ただし住所の地名末尾としては不適切な漢字の直後は除外する
+# - 年月日時分秒: 時間・日付関連（2024年1-2, 3時30-45 等）
+# - 号: 番号・信号等の末尾（管理番号3-7-12, 信号3-2 等）
+__ADDRESS_NON_PLACE_KANJI = set("年月日時分秒号")
 __ADDRESS_PATTERN = re.compile(
     r"([\u3400-\u4DBF\u4E00-\u9FFF])"  # 漢字1文字（直前の地名末尾）
     r"(\d+)-(\d+)"  # 地番-枝番（必須の2要素）
     r"(?:-(\d+))?"  # 3要素目（オプション）
     r"(?:-(\d+))?"  # 4要素目（オプション: 部屋番号）
 )
-# 号室パターン（明示的）: 漢字またはカタカナの直後の3桁以上の数字 + 号室/号（必須）
-# 「号室」「号」が明示されているので、漢字直後でも確実に部屋番号
-__ROOM_NUMBER_EXPLICIT_PATTERN = re.compile(
-    r"([\u3400-\u4DBF\u4E00-\u9FFF\u30A0-\u30FF])"  # 漢字またはカタカナ（建物名末尾）
-    r"(\d{3,})"  # 3桁以上の数字（部屋番号）
-    r"(号室|号)"  # 「号室」「号」（必須）
+# 市区町村名などを省略した住所表記（3要素 + 空白 + 号室）: 2-11-3 309号室 のような形式
+# 接尾辞 (号室|号) を必須にすることで、「5-3-2 200試合」のような非住所パターンの
+# 誤マッチを防ぐ（接尾辞なしの場合は住所かどうか判断できないため変換しない）
+__ADDRESS_STANDALONE_3PART_WITH_ROOM_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9])"
+    r"(\d+)-(\d+)-(\d+)"
+    r"\s+"
+    r"(\d{3,4})"
+    r"(号室|号)"
+    r"(?![A-Za-z0-9])"
+)
+# 「号室」パターン: 文中の「309号室」のような表記を変換
+__ROOM_NUMBER_GOUSHITSU_PATTERN = re.compile(r"(?<!\d)(\d{3,4})号室")
+# 「号」パターン: 文脈が住所・建物であると判断できる場合のみ変換
+__ROOM_NUMBER_GOU_PATTERN = re.compile(r"(?<!\d)(\d{3,4})号(?!室)")
+# 号の文脈判定に使う「住所らしさ」パターン
+# 単独の行政区画漢字（都/道/府/県/市/区/町/村）は「市場」「区別」「北海道」等の
+# 非住所語でも頻繁にマッチするため除外し、明示的な住所語彙のみ残す
+__ADDRESS_CONTEXT_PATTERN = re.compile(
+    r"(?:"
+    r"\d+(?:-|の)\d+(?:(?:-|の)\d+){1,2}"  # 3~4要素: 1-2-3, 1の2の3の4
+    r"|\d+の\d+"  # 2要素の「の」区切り（step 4 変換後の住所: 588の15 等）
+    # ハイフン区切りの2要素（3-5 等）は非住所でも頻出するため含めない
+    r"|丁目|番地"  # 明示的な住所語彙
+    r")"
+)
+# 「1番2」「1番地2」「543番21」などの番地表記を検出するパターン
+__ADDRESS_JP_NUMBERING_PATTERN = re.compile(r"\d+番(?:地)?(?:\d+)?(?:-\d+)?")
+# 住所ブロック（地番・住居表示）のパターン
+__ADDRESS_BLOCK_PATTERN = re.compile(r"\d+(?:-|の)\d+(?:(?:-|の)\d+){1,2}")
+# 住所ブロックと号の間に許容する建物名テキストのパターン
+# \u200c は __normalize_phone_postal_address_floor() 内のマーカー文字で、
+# 住所変換後に挿入されるため、このパターンでも許容する必要がある
+__ADDRESS_TO_ROOM_TAIL_ALLOWED_PATTERN = re.compile(
+    r"[\u200c \u3000A-Za-z0-9\u3040-\u30FF\u3400-\u9FFF々〆ヶノの・ー第\-]{0,64}"
+)
+# 号の文脈判定に使う建物名キーワード
+__BUILDING_NAME_PATTERN = re.compile(
+    r"(?:マンション|ハイツ|コーポ|レジデンス|アパート|ビル|タワー|荘|コート|ハイム|邸|館|棟)"
 )
 # 号室パターン（暗黙的）: カタカナの直後の3桁以上の数字（号室/号なし）
 # 「石田ハイツ101」のようにカタカナ建物名の直後に部屋番号が来るケース
@@ -317,7 +352,7 @@ __ROOM_NUMBER_EXPLICIT_PATTERN = re.compile(
 __ROOM_NUMBER_IMPLICIT_PATTERN = re.compile(
     r"([\u30A0-\u30FF])"  # カタカナのみ（建物名末尾）
     r"(\d{3,})"  # 3桁以上の数字（部屋番号）
-    r"(?![a-zA-Z\d])"  # 後に英字や数字が続かないこと
+    r"(?!号室|号|[a-zA-Z\d])"  # 後に号室/号/英字/数字が続かないこと
 )
 # フロア表記パターン: NF → N階, BNF → 地下N階
 # 後に英字が続く場合は変換しない（5GHz, UTF-8, PDF などを除外）
@@ -477,7 +512,7 @@ __CURRENCY_PATTERN = re.compile(
 __ALPHABET_PATTERN = re.compile(r"[a-zA-Z]")
 __NUMBER_PATTERN = re.compile(r"[0-9]+(\.[0-9]+)?")
 __ENGLISH_WORD_WITH_NUMBER_PATTERN = re.compile(
-    r"([a-zA-Z]+)[\s-]?([1-9]|1[01])(?!\d|\.\d)"  # 12 以降は英語読みしない
+    r"([a-zA-Z]+)[\s-]?([1-9]|1[01])(?!\d|\.\d|-\d)"  # 12 以降は英語読みしない
 )
 __ENGLISH_WORD_PATTERN = re.compile(r"[a-zA-Z0-9]")
 
@@ -1218,7 +1253,9 @@ def __normalize_phone_postal_address_floor(text: str) -> str:
         """
         部屋番号の数字をカタカナ読みに変換する。
 
-        中間の 0 は「マル」、先頭・末尾の 0 は「ゼロ」。
+        3桁の部屋番号では中間の 0 を「マル」と読む（例: 409→ヨンマルキュー）。
+        4桁以上の部屋番号では中間の 0 も「ゼロ」と読む（例: 1409→イチヨンゼロキュー）。
+        先頭・末尾の 0 は桁数に関係なく常に「ゼロ」。
         末尾の1モーラ数字（2, 5）は伸ばさない（号室末尾ルール）。
 
         Args:
@@ -1228,11 +1265,117 @@ def __normalize_phone_postal_address_floor(text: str) -> str:
             str: カタカナ読みに変換された文字列
         """
 
+        # 3桁の部屋番号のみ中間 0 をマルと読む
+        # 4桁以上の部屋番号では中間 0 もゼロと読む
+        is_use_maru = len(digits) == 3
         return digits_to_katakana(
             digits,
             is_shorten_trailing=True,
-            is_use_maru_for_middle_zero=True,
+            is_use_maru_for_middle_zero=is_use_maru,
         )
+
+    def convert_address_parts(
+        part1: str,
+        part2: str,
+        part3: str | None = None,
+        part4: str | None = None,
+        room_suffix: str = "",
+    ) -> str:
+        """
+        住所の番地パーツを「の」区切りの読み上げ形式に変換する。
+
+        Args:
+            part1 (str): 1要素目
+            part2 (str): 2要素目
+            part3 (str | None): 3要素目
+            part4 (str | None): 4要素目（部屋番号候補）
+            room_suffix (str): 末尾に付与する接尾辞（号室・号など）
+
+        Returns:
+            str: 変換後の文字列
+        """
+
+        result = f"{part1}の{part2}"
+        if part3 is not None:
+            result += f"の{part3}"
+        if part4 is not None:
+            # 4要素目が3桁以上の場合は部屋番号として桁読み
+            if len(part4) >= 3:
+                result += f"の{convert_room_number_digits(part4)}"
+            else:
+                result += f"の{part4}"
+        if room_suffix:
+            result += room_suffix
+        return result
+
+    def has_address_context(prefix_text: str) -> bool:
+        """
+        直前文脈が住所・建物表記かどうかをヒューリスティックに判定する。
+
+        文境界（。.!?:改行）を考慮し、境界を挟んだ住所文脈の波及を防ぐ。
+        本関数は __replace_symbols() 内から呼び出され、replace_punctuation() より先に
+        実行されるため、「。」はまだ「。」のまま残っている。
+        一方 jaconv.z2h() は先に実行されるため「！→!」「？→?」「：→:」は半角に変換済み。
+        そのため「。」と半角「.!?:」の両方を文境界として検出する必要がある。
+        たとえば「東京都港区六本木1-2-3に届いた。こだま309号で帰る」では、
+        「。」より前の住所文脈が「こだま309号」に波及しない。
+
+        Args:
+            prefix_text (str): 判定対象の先行文脈
+
+        Returns:
+            bool: 住所文脈と判断できる場合は True
+        """
+
+        context = prefix_text[-160:]
+
+        # 住所ブロック（例: 1-2-3, 1の2の3）を文脈中から探索し、
+        # その後ろに建物名相当のテキストを最大64文字まで許容する。
+        # これにより「... 1-34-5 パークハイム鹿島田第一 204号」のように、
+        # 住所と号の間に建物名が挟まるケースでも住所文脈として判定できる。
+        # 文境界チェック不要: tail_text に「。」等が含まれると fullmatch が失敗するため
+        for address_block_match in __ADDRESS_BLOCK_PATTERN.finditer(context):
+            tail_text = context[address_block_match.end() :]
+            if __ADDRESS_TO_ROOM_TAIL_ALLOWED_PATTERN.fullmatch(tail_text) is not None:
+                return True
+
+        # 以降のチェックは文境界以降の近傍コンテキストのみで判定する
+        # これにより「住所文脈。非住所の号」のようなケースで住所文脈が波及しない
+        # 本関数は __replace_symbols() 内から呼び出され、replace_punctuation() よりも先に実行される
+        # jaconv.z2h() は先に実行済みのため「！→!」「？→?」「：→:」は半角に変換済み
+        # 一方「。」(U+3002) は CJK 句読点のため z2h では変換されず、そのまま残っている
+        # そのため「。」と半角「.!?:」の両方を文境界として検出する
+        last_boundary = max(
+            context.rfind("。"),
+            context.rfind("."),
+            context.rfind("!"),
+            context.rfind("?"),
+            context.rfind(":"),
+            context.rfind("\n"),
+        )
+        # 文境界が見つかった場合はそれ以降のみ、見つからなければ全体を使用
+        nearby_context = context[last_boundary + 1 :] if last_boundary >= 0 else context
+
+        # 「丁目」「番地」の明示的な住所語彙、または住所数字パターン
+        if __ADDRESS_CONTEXT_PATTERN.search(nearby_context) is not None:
+            return True
+        # 「543番21」等の番地表記
+        if __ADDRESS_JP_NUMBERING_PATTERN.search(nearby_context) is not None:
+            return True
+
+        # 建物名キーワード（タワー、ビル、館 等）は号の直近でのみ有効とする
+        # 「マンション205号」→変換、「東京タワーの入場券309号」→変換しない
+        # 最後にマッチしたキーワードの末尾がコンテキスト末尾から2文字以内の場合のみ
+        # 住所文脈と判定する（スペース1文字分を許容）
+        last_building_match: re.Match[str] | None = None
+        for building_match in __BUILDING_NAME_PATTERN.finditer(context):
+            last_building_match = building_match
+        if last_building_match is not None:
+            distance_from_end = len(context) - last_building_match.end()
+            if distance_from_end <= 2:
+                return True
+
+        return False
 
     # マーカー文字: 電話番号・郵便番号・住所の変換結果の末尾に付加する
     # マーカーの直後にある半角スペースをカンマに変換し、残ったマーカーは削除する
@@ -1293,37 +1436,60 @@ def __normalize_phone_postal_address_floor(text: str) -> str:
         part2 = match.group(3)  # 枝番
         part3 = match.group(4)  # 3要素目（オプション）
         part4 = match.group(5)  # 4要素目（オプション: 部屋番号候補）
-
-        result = f"{kanji}{part1}の{part2}"
-
-        if part3 is not None:
-            result += f"の{part3}"
-
-        if part4 is not None:
-            # 4要素目が3桁以上の場合は部屋番号として桁読み
-            if len(part4) >= 3:
-                result += f"の{convert_room_number_digits(part4)}"
-            else:
-                result += f"の{part4}"
-
-        return result + _MARKER
+        result = convert_address_parts(part1, part2, part3, part4)
+        return f"{kanji}{result}{_MARKER}"
 
     text = __ADDRESS_PATTERN.sub(convert_address, text)
 
-    # 5a. 号室番号（明示的: 号室/号が付いている場合）を処理する
-    def convert_room_number_explicit(match: re.Match[str]) -> str:
-        prefix_char = match.group(1)  # 漢字またはカタカナ
-        digits = match.group(2)  # 3桁以上の数字
-        suffix = match.group(3)  # 「号室」「号」
-        return f"{prefix_char}{convert_room_number_digits(digits)}{suffix}"
+    # 5a. 市区町村名などを省略した住所（3要素 + 空白 + 号室）を処理する
+    def convert_standalone_3part_with_room(match: re.Match[str]) -> str:
+        part1 = match.group(1)
+        part2 = match.group(2)
+        part3 = match.group(3)
+        room_number = match.group(4)
+        room_suffix = match.group(5) or ""
+        return (
+            convert_address_parts(
+                part1,
+                part2,
+                part3,
+                room_number,
+                room_suffix=room_suffix,
+            )
+            + _MARKER
+        )
 
-    text = __ROOM_NUMBER_EXPLICIT_PATTERN.sub(convert_room_number_explicit, text)
+    text = __ADDRESS_STANDALONE_3PART_WITH_ROOM_PATTERN.sub(
+        convert_standalone_3part_with_room,
+        text,
+    )
 
-    # 5b. 号室番号（暗黙的: カタカナ建物名の直後、号室/号なし）を処理する
+    # 5b. 「号室」表記を処理する（文脈に依存せず変換）
+    # 建物名と部屋番号のカタカナ読みの間にポーズマーカー「'」を挿入する
+    # カタカナで終わる建物名（フォレストタワー等）の直後に桁読みが続くと
+    # 分かち書き境界が曖昧になり OpenJTalk のアクセント推定が不安定になるため
+    def convert_room_number_goushitsu(match: re.Match[str]) -> str:
+        digits = match.group(1)
+        return f"'{convert_room_number_digits(digits)}号室"
+
+    text = __ROOM_NUMBER_GOUSHITSU_PATTERN.sub(convert_room_number_goushitsu, text)
+
+    # 5c. 「号」表記を処理する（住所・建物文脈でのみ変換）
+    # 5b と同様にポーズマーカーを挿入する
+    def convert_room_number_gou(match: re.Match[str]) -> str:
+        digits = match.group(1)
+        if has_address_context(text[: match.start()]) is False:
+            return match.group(0)
+        return f"'{convert_room_number_digits(digits)}号"
+
+    text = __ROOM_NUMBER_GOU_PATTERN.sub(convert_room_number_gou, text)
+
+    # 5d. 号室番号（暗黙的: カタカナ建物名の直後、号室/号なし）を処理する
+    # 5b と同様にポーズマーカーを挿入する
     def convert_room_number_implicit(match: re.Match[str]) -> str:
         prefix_char = match.group(1)  # カタカナ
         digits = match.group(2)  # 3桁以上の数字
-        return f"{prefix_char}{convert_room_number_digits(digits)}"
+        return f"{prefix_char}'{convert_room_number_digits(digits)}"
 
     text = __ROOM_NUMBER_IMPLICIT_PATTERN.sub(convert_room_number_implicit, text)
 
@@ -1569,6 +1735,25 @@ def __convert_english_to_katakana(text: str) -> str:
         word_without_numbers = __NUMBER_PATTERN.sub("", word)
         if word_without_numbers in __UNIT_MAP:
             return word
+
+        # 英字の直後に「数字-数字...」が続くパターンは、住所・型番・番地の文脈で使われることが多いため、
+        # 数字部分のハイフンを維持したまま、英字部分のみを変換する
+        # 例: ABC1-2-3 -> エービーシー1-2-3
+        alpha_with_hyphenated_numbers_match = re.fullmatch(
+            r"([a-zA-Z]+)(\d+(?:-\d+)+)",
+            word,
+        )
+        if alpha_with_hyphenated_numbers_match:
+            base_word = alpha_with_hyphenated_numbers_match.group(1)
+            numeric_tail = alpha_with_hyphenated_numbers_match.group(2)
+            converted_base_word = process_english_word(
+                base_word,
+                enable_romaji_c2k=enable_romaji_c2k,
+            )
+            # 英字部分が変換できない場合は、原文をそのまま返す
+            if converted_base_word == base_word:
+                return word
+            return f"{converted_base_word}{numeric_tail}"
 
         # 英単語の末尾に 11 以下の数字 (1.0 のような小数表記を除く) がつく場合の処理 (例: iPhone 11, Pixel8)
         number_match = __ENGLISH_WORD_WITH_NUMBER_PATTERN.match(word)

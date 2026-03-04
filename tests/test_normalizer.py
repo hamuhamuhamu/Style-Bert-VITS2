@@ -1,3 +1,5 @@
+import pytest
+
 from style_bert_vits2.nlp.japanese.normalizer import normalize_text
 
 
@@ -1304,9 +1306,11 @@ def test_normalize_text_addresses():
     各要素のうち2桁以下はそのまま（pyopenjtalk が通常読み）、
     4要素目が3桁以上の場合は部屋番号として桁読み。
     部屋番号の桁読みルール:
-      0→ゼロ（先頭・末尾）/ マル（中間）
+      0→ゼロ（先頭・末尾）/ マル（3桁の中間のみ）
       1→イチ, 2→ニー, 3→サン, 4→ヨン, 5→ゴー,
       6→ロク, 7→ナナ, 8→ハチ, 9→キュー
+      3桁の中間0は「マル」と読むが、4桁以上の中間0は「ゼロ」と読む。
+      例: 409→ヨンマルキュー, 1409→イチヨンゼロキュー
     号室末尾は伸ばさない:
       部屋番号の末尾が 2 または 5 の場合、短く読む（ニ, ゴ）。
       住所の最後なので韻を踏む必要がないため。
@@ -1352,7 +1356,7 @@ def test_normalize_text_addresses():
     assert normalize_text("赤坂1-2-3-301") == "赤坂1の2の3のサンマルイチ"
     # 4桁の部屋番号
     assert normalize_text("赤坂1-2-3-1001") == "赤坂1の2の3のイチゼロゼロイチ"
-    assert normalize_text("赤坂1-2-3-1409") == "赤坂1の2の3のイチヨンマルキュー"
+    assert normalize_text("赤坂1-2-3-1409") == "赤坂1の2の3のイチヨンゼロキュー"
     # 4要素目でも2桁以下は通常読み（枝番として扱う）
     assert normalize_text("赤坂1-2-3-40") == "赤坂1の2の3の40"
 
@@ -1360,17 +1364,37 @@ def test_normalize_text_addresses():
     # 3桁以上の号室番号は桁読み
     assert (
         normalize_text("茨城県下妻市今泉613-6 コーポ今泉301号室")
-        == "茨城県下妻市今泉613の6,コーポ今泉サンマルイチ号室"
+        == "茨城県下妻市今泉613の6,コーポ今泉'サンマルイチ号室"
     )
-    assert normalize_text("石田ハイツ101") == "石田ハイツイチマルイチ"
+    assert normalize_text("石田ハイツ101") == "石田ハイツ'イチマルイチ"
     assert (
         normalize_text("グリーンコート赤坂409号室")
-        == "グリーンコート赤坂ヨンマルキュー号室"
+        == "グリーンコート赤坂'ヨンマルキュー号室"
     )
     # 「号」のみの表記
-    assert normalize_text("〇〇マンション205号") == "マンションニーマルゴ号"
+    assert normalize_text("〇〇マンション205号") == "マンション'ニーマルゴ号"
     # 2桁の号室は通常読み（pyopenjtalk に任せる）
     assert normalize_text("〇〇荘12号室") == "荘12号室"
+    # 号室は文中でも変換する
+    assert (
+        normalize_text("お客様は309号室にお住まいなのですね。")
+        == "お客様は'サンマルキュー号室にお住まいなのですね."
+    )
+    # 「号」は住所文脈がある場合のみ変換し、列車番号などは変換しない
+    assert normalize_text("こだま309号が発車します") == "こだま309号が発車します"
+
+    # --- 市区町村名などを省略した住所表記 ---
+    # 4要素の standalone（2-11-3-309）はバージョン番号等と区別がつかないため変換しない
+    assert normalize_text("2-11-3-309") == "2-11-3-309"
+    # 3要素 + 空白 + 数字: 接尾辞（号/号室）なしは曖昧なため変換しない
+    assert normalize_text("2-11-3 309") == "2-11-3'309"
+    # 3要素 + 空白 + 号/号室: 接尾辞ありの場合のみ変換する
+    assert normalize_text("2-11-3 309号") == "2の11の3のサンマルキュー号"
+    assert normalize_text("2-11-3 1205号室") == "2の11の3のイチニーゼロゴ号室"
+    assert (
+        normalize_text("プラウド武蔵小杉1205号室")
+        == "プラウド武蔵小杉'イチニーゼロゴ号室"
+    )
 
     # --- 文中の住所 ---
     assert (
@@ -1385,7 +1409,7 @@ def test_normalize_text_addresses():
         normalize_text(
             "福岡県北九州市小倉南区石田町399-18 石田ハイツ101にお届けします。"
         )
-        == "福岡県北九州市小倉南区石田町399の18,石田ハイツイチマルイチにお届けします."
+        == "福岡県北九州市小倉南区石田町399の18,石田ハイツ'イチマルイチにお届けします."
     )
 
     # --- 「丁目」「番地」「号」表記は既存処理のまま通過する ---
@@ -1400,6 +1424,611 @@ def test_normalize_text_addresses():
     assert normalize_text("ABC1-2-3") == "エービーシー1-2-3"
     # 住所の番地が1要素のみ（ハイフンなし）は住所変換対象外
     assert normalize_text("六本木7") == "六本木7"
+
+
+def test_normalize_text_room_number_digit_patterns():
+    """
+    部屋番号の桁読みテスト: 多様な数字パターンでの期待値をハードコードで検証する。
+
+    特に以下のパターンを重点的にカバーする:
+    - 3桁 vs 4桁で中間0の読み方が異なる（マル vs ゼロ）
+    - 1モーラ数字（2, 5）の末尾での短縮（ニー→ニ, ゴー→ゴ）
+    - 連続する0の扱い（ゼロゼロ）
+    - 先頭・末尾0の読み方（ゼロ）
+    """
+
+    # ========== 3桁の部屋番号: 中間0→マル ==========
+    # 基本パターン: X0Y（中間0をマルと読む）
+    assert normalize_text("赤坂1-2-3-101") == "赤坂1の2の3のイチマルイチ"
+    assert normalize_text("赤坂1-2-3-301") == "赤坂1の2の3のサンマルイチ"
+    assert normalize_text("赤坂1-2-3-409") == "赤坂1の2の3のヨンマルキュー"
+    assert normalize_text("赤坂1-2-3-507") == "赤坂1の2の3のゴーマルナナ"
+    assert normalize_text("赤坂1-2-3-608") == "赤坂1の2の3のロクマルハチ"
+    assert normalize_text("赤坂1-2-3-903") == "赤坂1の2の3のキューマルサン"
+    # 末尾が2→ニ（短く読む）
+    assert normalize_text("赤坂1-2-3-102") == "赤坂1の2の3のイチマルニ"
+    assert normalize_text("赤坂1-2-3-302") == "赤坂1の2の3のサンマルニ"
+    assert normalize_text("赤坂1-2-3-902") == "赤坂1の2の3のキューマルニ"
+    # 末尾が5→ゴ（短く読む）
+    assert normalize_text("赤坂1-2-3-105") == "赤坂1の2の3のイチマルゴ"
+    assert normalize_text("赤坂1-2-3-205") == "赤坂1の2の3のニーマルゴ"
+    assert normalize_text("赤坂1-2-3-805") == "赤坂1の2の3のハチマルゴ"
+    # 0が含まれないパターン（マルにならない）
+    assert normalize_text("赤坂1-2-3-123") == "赤坂1の2の3のイチニーサン"
+    assert normalize_text("赤坂1-2-3-456") == "赤坂1の2の3のヨンゴーロク"
+    assert normalize_text("赤坂1-2-3-789") == "赤坂1の2の3のナナハチキュー"
+    # 先頭が0→ゼロ
+    assert normalize_text("赤坂1-2-3-041") == "赤坂1の2の3のゼロヨンイチ"
+    # 末尾が0→ゼロ
+    assert normalize_text("赤坂1-2-3-410") == "赤坂1の2の3のヨンイチゼロ"
+    assert normalize_text("赤坂1-2-3-520") == "赤坂1の2の3のゴーニーゼロ"
+    # 連続0（ゼロゼロ、マルにならない）
+    assert normalize_text("赤坂1-2-3-100") == "赤坂1の2の3のイチゼロゼロ"
+    assert normalize_text("赤坂1-2-3-200") == "赤坂1の2の3のニーゼロゼロ"
+    assert normalize_text("赤坂1-2-3-500") == "赤坂1の2の3のゴーゼロゼロ"
+
+    # ========== 4桁の部屋番号: 中間0→ゼロ ==========
+    # 基本パターン: 4桁では中間0もゼロと読む
+    assert normalize_text("赤坂1-2-3-1409") == "赤坂1の2の3のイチヨンゼロキュー"
+    assert normalize_text("赤坂1-2-3-1205") == "赤坂1の2の3のイチニーゼロゴ"
+    assert normalize_text("赤坂1-2-3-1302") == "赤坂1の2の3のイチサンゼロニ"
+    assert normalize_text("赤坂1-2-3-1507") == "赤坂1の2の3のイチゴーゼロナナ"
+    assert normalize_text("赤坂1-2-3-1608") == "赤坂1の2の3のイチロクゼロハチ"
+    assert normalize_text("赤坂1-2-3-1901") == "赤坂1の2の3のイチキューゼロイチ"
+    # 4桁で0なし
+    assert normalize_text("赤坂1-2-3-1234") == "赤坂1の2の3のイチニーサンヨン"
+    assert normalize_text("赤坂1-2-3-5678") == "赤坂1の2の3のゴーロクナナハチ"
+    # 4桁で連続0（ゼロゼロ）
+    assert normalize_text("赤坂1-2-3-1001") == "赤坂1の2の3のイチゼロゼロイチ"
+    assert normalize_text("赤坂1-2-3-2001") == "赤坂1の2の3のニーゼロゼロイチ"
+    # 4桁で末尾2→ニ（短く読む）
+    assert normalize_text("赤坂1-2-3-1102") == "赤坂1の2の3のイチイチゼロニ"
+    assert normalize_text("赤坂1-2-3-1502") == "赤坂1の2の3のイチゴーゼロニ"
+    # 4桁で末尾5→ゴ（短く読む）
+    assert normalize_text("赤坂1-2-3-1205") == "赤坂1の2の3のイチニーゼロゴ"
+    assert normalize_text("赤坂1-2-3-1305") == "赤坂1の2の3のイチサンゼロゴ"
+
+    # ========== 号室表記付きのハードコードテスト ==========
+    # マンション名 + 3桁号室
+    assert normalize_text("サクラハイツ101号室") == "サクラハイツ'イチマルイチ号室"
+    assert normalize_text("グリーンコート205号") == "グリーンコート'ニーマルゴ号"
+    assert normalize_text("パークハイム502号室") == "パークハイム'ゴーマルニ号室"
+    assert (
+        normalize_text("フォレストタワー809号室")
+        == "フォレストタワー'ハチマルキュー号室"
+    )
+    # マンション名 + 4桁号室
+    assert (
+        normalize_text("プラウド武蔵小杉1205号室")
+        == "プラウド武蔵小杉'イチニーゼロゴ号室"
+    )
+    assert (
+        normalize_text("ネクサス鹿島田1409号室")
+        == "ネクサス鹿島田'イチヨンゼロキュー号室"
+    )
+    assert normalize_text("サクラコート1302号") == "サクラコート'イチサンゼロニ号"
+    assert (
+        normalize_text("フォレストタワー2001号室")
+        == "フォレストタワー'ニーゼロゼロイチ号室"
+    )
+
+    # ========== 住所 + 建物名 + 号室 の複合テスト（ハードコード期待値） ==========
+    assert (
+        normalize_text("東京都港区六本木1-2-3 サクラハイツ409号室")
+        == "東京都港区六本木1の2の3,サクラハイツ'ヨンマルキュー号室"
+    )
+    assert (
+        normalize_text("大阪府大阪市北区梅田3-1-3 グリーンコート1205号室")
+        == "大阪府大阪市北区梅田3の1の3,グリーンコート'イチニーゼロゴ号室"
+    )
+    assert (
+        normalize_text("赤坂9-7-1 パークタワー1409号")
+        == "赤坂9の7の1,パークタワー'イチヨンゼロキュー号"
+    )
+    assert (
+        normalize_text("六本木1-2-3 フォレストタワー502号室")
+        == "六本木1の2の3,フォレストタワー'ゴーマルニ号室"
+    )
+    # 住所 + 建物名 + 4桁号室（末尾2→ニ）
+    assert (
+        normalize_text("宮城県仙台市若林区裏柴田町36-1 柴田ハイツ1302号室")
+        == "宮城県仙台市若林区裏柴田町36の1,柴田ハイツ'イチサンゼロニ号室"
+    )
+    # 住所 + 建物名 + 4桁号室（末尾5→ゴ）
+    assert (
+        normalize_text("静岡県焼津市岡当目588-15 プラウド焼津1205号室")
+        == "静岡県焼津市岡当目588の15,プラウド焼津'イチニーゼロゴ号室"
+    )
+
+
+def _convert_room_digits_for_expected(digits: str) -> str:
+    """号室・部屋番号の期待値生成用ヘルパー。"""
+
+    digit_to_katakana = {
+        "0": "ゼロ",
+        "1": "イチ",
+        "2": "ニー",
+        "3": "サン",
+        "4": "ヨン",
+        "5": "ゴー",
+        "6": "ロク",
+        "7": "ナナ",
+        "8": "ハチ",
+        "9": "キュー",
+    }
+    digit_to_short = {
+        "2": "ニ",
+        "5": "ゴ",
+    }
+
+    # 3桁の部屋番号のみ中間 0 をマルと読む
+    # 4桁以上の部屋番号では中間 0 もゼロと読む
+    ## 例: 3桁 "409" → ヨンマルキュー, 4桁 "1409" → イチヨンゼロキュー
+    is_use_maru = len(digits) == 3
+
+    converted = ""
+    for index, digit in enumerate(digits):
+        is_first = index == 0
+        is_last = index == len(digits) - 1
+        # 中間 0 はマルにする（3桁かつ前後がともに非 0 の場合のみ）
+        if (
+            is_use_maru is True
+            and is_first is False
+            and is_last is False
+            and digit == "0"
+            and digits[index - 1] != "0"
+            and digits[index + 1] != "0"
+        ):
+            converted += "マル"
+            continue
+        # 末尾の 2 / 5 は短く読む
+        if is_last is True and digit in digit_to_short:
+            converted += digit_to_short[digit]
+            continue
+        converted += digit_to_katakana[digit]
+    return converted
+
+
+def _build_room_context_positive_cases() -> list[tuple[str, str]]:
+    """住所 + 建物名 + 号 / 号室 の大量ケースを生成する。"""
+
+    address_cases = [
+        ("神奈川県川崎市幸区鹿島田1-34-5", "神奈川県川崎市幸区鹿島田1の34の5"),
+        ("東京都港区赤坂1-2-3", "東京都港区赤坂1の2の3"),
+        ("大阪府大阪市北区梅田3-1-3", "大阪府大阪市北区梅田3の1の3"),
+        ("福岡県北九州市小倉南区石田町399-18", "福岡県北九州市小倉南区石田町399の18"),
+        ("宮城県仙台市若林区裏柴田町36-1", "宮城県仙台市若林区裏柴田町36の1"),
+        ("静岡県焼津市岡当目588-15", "静岡県焼津市岡当目588の15"),
+        ("奈良県桜井市鹿路341-18", "奈良県桜井市鹿路341の18"),
+        ("六本木1-2-3", "六本木1の2の3"),
+        ("赤坂9-7-1", "赤坂9の7の1"),
+        ("神奈川県川崎市幸区鹿島田１−３４−５", "神奈川県川崎市幸区鹿島田1の34の5"),
+    ]
+    building_names = [
+        "パークハイム鹿島田第一",
+        "プラウド武蔵小杉",
+        "鹿島田第一",
+        "ネクサス鹿島田",
+        "サクラコート",
+        "フォレストタワー",
+    ]
+    room_numbers = [
+        # 3桁: 中間0→マル
+        "101",  # イチマルイチ
+        "204",  # ニーマルヨン（先頭1モーラ数字2）
+        "309",  # サンマルキュー
+        "405",  # ヨンマルゴ（末尾1モーラ数字5→ゴ）
+        "502",  # ゴーマルニ（先頭1モーラ数字5、末尾1モーラ数字2→ニ）
+        "802",  # ハチマルニ（末尾1モーラ数字2→ニ）
+        # 3桁: 0なし
+        "123",  # イチニーサン
+        "789",  # ナナハチキュー
+        # 3桁: 先頭・末尾0→ゼロ
+        "100",  # イチゼロゼロ（連続0）
+        "410",  # ヨンイチゼロ（末尾0）
+        # 4桁: 中間0→ゼロ（マルではない）
+        "1205",  # イチニーゼロゴ（末尾1モーラ数字5→ゴ）
+        "1409",  # イチヨンゼロキュー
+        "1302",  # イチサンゼロニ（末尾1モーラ数字2→ニ）
+        "1001",  # イチゼロゼロイチ（連続0）
+        "2505",  # ニーゴーゼロゴ（先頭・中間に1モーラ数字）
+    ]
+    suffixes = [
+        "号",
+        "号室",
+    ]
+    spaces = [
+        " ",
+    ]
+
+    cases: list[tuple[str, str]] = []
+    for address_input, normalized_address in address_cases:
+        for space_between_address_and_building in spaces:
+            for building_name in building_names:
+                for space_between_building_and_room in spaces:
+                    for room_number in room_numbers:
+                        room_katakana = _convert_room_digits_for_expected(room_number)
+                        for suffix in suffixes:
+                            text = (
+                                f"{address_input}"
+                                f"{space_between_address_and_building}"
+                                f"{building_name}"
+                                f"{space_between_building_and_room}"
+                                f"{room_number}{suffix}"
+                            )
+                            expected = (
+                                f"{normalized_address},{building_name}"
+                                f"'{room_katakana}{suffix}"
+                            )
+                            cases.append((text, expected))
+    return cases
+
+
+def _build_room_context_negative_cases() -> list[tuple[str, str]]:
+    """住所文脈がない 号 の非変換ケースを大量生成する。"""
+
+    prefixes = [
+        "こだま",
+        "のぞみ",
+        "ひかり",
+        "特急",
+        "急行",
+        "第",
+        "作品",
+        "問題",
+        "章",
+        "話",
+        "案件",
+        "型番",
+        "規格",
+        "便",
+        "列車",
+        "ルール",
+        "プロトコル",
+        "プレイリスト",
+        "任務",
+        "講義",
+        "イベント",
+        "チャンネル",
+        "プラン",
+        "フォーマット",
+        "テンプレート",
+        "シリーズ",
+        "ファイル",
+        "プロジェクト",
+        "テスト",
+        "モデル",
+    ]
+    room_numbers = [
+        "101",
+        "204",
+        "309",
+        "405",
+        "502",
+        "1205",
+        "1409",
+        "1302",
+    ]
+    suffixes = [
+        "号",
+    ]
+
+    cases: list[tuple[str, str]] = []
+    for prefix in prefixes:
+        for room_number in room_numbers:
+            for suffix in suffixes:
+                text = f"{prefix}{room_number}{suffix}を参照してください"
+                expected = text
+                cases.append((text, expected))
+    return cases
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    _build_room_context_positive_cases(),
+)
+def test_normalize_text_room_context_positive_massive(text: str, expected: str):
+    """住所文脈ありの 号 / 号室 の正規化を大量ケースで検証する。"""
+
+    assert normalize_text(text) == expected
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    _build_room_context_negative_cases(),
+)
+def test_normalize_text_room_context_negative_massive(text: str, expected: str):
+    """住所文脈なしの 号 の誤変換を大量ケースで検証する。"""
+
+    assert normalize_text(text) == expected
+
+
+# =========================================================================
+# 偽陽性テスト: 住所文脈ではないのに号が桁読みに誤変換されるケース
+# has_address_context() の誤判定を検出するためのテスト群
+# =========================================================================
+
+
+def _build_gou_false_positive_admin_kanji_cases() -> list[tuple[str, str]]:
+    """
+    行政区画漢字（都道府県市区町村）を含むが住所文脈ではない文で、
+    NNN号 が桁読みに誤変換されないことを検証するケースを生成する。
+
+    has_address_context() の __ADDRESS_CONTEXT_PATTERN が単漢字マッチのため、
+    「市場」「区別」「北海道」等の非住所語に含まれる漢字で偽陽性が発生する。
+    """
+
+    # {num} に数字を埋め込み、{num}号 が変換されないことを確認する
+    # 各テンプレートには行政区画漢字を含む非住所語が含まれている
+    templates = [
+        # 「市」: 市場, 市民, 都市, 市販, 闇市, 朝市, 市街地, 市長
+        "市場で{num}号の整理券を受け取った",
+        "市民ホールで公演{num}号が開催された",
+        "都市計画のプロジェクト{num}号を推進する",
+        "市販の製品カタログ{num}号を確認した",
+        "闇市で仕入れた品物の管理タグ{num}号がある",
+        "朝市で整理券{num}号を配布している",
+        "市街地で特別列車{num}号を見かけた",
+        "市長が法案{num}号に署名した",
+        # 「区」: 区別, 区間, 地区, 学区, 区画, 特区
+        "区別がつかないので識別番号{num}号を振った",
+        "区間快速の列車{num}号に乗った",
+        "地区大会で選手番号{num}号が優勝した",
+        "学区の会報誌{num}号が届いた",
+        "区画整理の事業認可{num}号が下りた",
+        "特区に指定された施設の登録番号{num}号です",
+        # 「町」: 下町, 城下町, 門前町, 町内, 町工場
+        "下町の店で整理券{num}号を配布した",
+        "城下町を散策して記念コイン{num}号を購入した",
+        "門前町の伝統祭りでくじ{num}号を引いた",
+        "町内会の回覧板{num}号を回してください",
+        "町工場で部品{num}号を製造している",
+        # 「村」: 村上, 村田, 農村, 漁村, 山村
+        "村上春樹の短編集で作品{num}号が好きだ",
+        "村田製作所の製品カタログ{num}号を確認した",
+        "農村の暮らしを描いた絵画{num}号が入賞した",
+        "漁村で水揚げされた漁獲管理番号{num}号を確認した",
+        "山村留学のパンフレット{num}号を取り寄せた",
+        # 「道」: 北海道, 柔道, 書道, 鉄道, 水道, 歩道, 茶道
+        "北海道の名産品カタログ{num}号を取り寄せた",
+        "柔道の段位証書{num}号を授与された",
+        "書道展に出品された作品{num}号が入賞した",
+        "鉄道ファンの雑誌{num}号を購読している",
+        "水道の検査レポート{num}号を提出した",
+        "歩道の改善要望書{num}号が受理された",
+        "茶道の免状で認定番号{num}号を受けた",
+        # 「府」: 政府, 幕府, 府中, 内閣府
+        "政府が発表した政令{num}号を確認した",
+        "幕府が発布した法令{num}号を調査した",
+        "府中の競馬場でレース{num}号が開催された",
+        "内閣府の告示{num}号を参照してください",
+        # 「県」: 県庁, 県民, 県警, 県道
+        "県庁で申請書{num}号を提出した",
+        "県民アンケート{num}号を集計した",
+        "県警が捜査資料{num}号を公開した",
+        "県道の標識を管理番号{num}号で登録した",
+        # 「都」: 都合, 首都, 都営, 都心, 都度
+        "都合が悪いので予約{num}号をキャンセルした",
+        "首都高速の路線{num}号が渋滞している",
+        "都営バスの系統{num}号に乗車した",
+        "都心で開催されたイベントのブース{num}号に出展した",
+        "都度払いで請求書{num}号を発行した",
+    ]
+
+    numbers = ["309", "205", "1205"]
+
+    cases: list[tuple[str, str]] = []
+    for template in templates:
+        for num in numbers:
+            text = template.format(num=num)
+            # 期待値: NNN号 が桁読みに変換されない（入力と同一）
+            cases.append((text, text))
+    return cases
+
+
+def _build_gou_false_positive_building_keyword_cases() -> list[tuple[str, str]]:
+    """
+    建物名キーワード（タワー, ビル, 館 等）を含むが住所文脈ではない文で、
+    NNN号 が桁読みに誤変換されないことを検証するケースを生成する。
+
+    has_address_context() の __BUILDING_NAME_PATTERN が部分一致のため、
+    「東京タワー」「体育館」「ビルド」等の非建物名語に含まれるキーワードで偽陽性が発生する。
+    """
+
+    templates = [
+        # 「タワー」: 東京タワー, タワーレコード, タワーディフェンス
+        "東京タワーの入場券{num}号を持っている",
+        "タワーレコードの注文番号{num}号が発送された",
+        "タワーディフェンスゲームのステージ{num}号をクリアした",
+        # 「ビル」: ビルド, ビルダー, ビル（人名）
+        "ビルドエラーのチケット{num}号を修正した",
+        "ビルダーパターンのプルリクエスト{num}号をマージした",
+        # 「館」: 体育館, 図書館, 映画館, 美術館, 水族館, 博物館
+        "体育館でロッカー番号{num}号を使った",
+        "図書館の蔵書番号{num}号を借りた",
+        "映画館でシアター{num}号に入場した",
+        "美術館の展示品番号{num}号が修復中だ",
+        "水族館のチケット{num}号で入場した",
+        "博物館の収蔵品{num}号を展示する予定だ",
+        # 「荘」: 荘厳, 荘園
+        "荘厳な雰囲気の演奏会プログラム{num}号が始まった",
+        "荘園の歴史を記した文献{num}号を参照した",
+        # 「コート」: テニスコート, バスケットボールコート, コート（衣類）
+        "テニスコートの利用予約番号{num}号を取った",
+        "コートを着て外出し整理券{num}号を受け取った",
+        # 「棟」: 棟梁
+        "棟梁が手がけた建築の文化財指定{num}号を受けた",
+    ]
+
+    numbers = ["309", "205", "1205"]
+
+    cases: list[tuple[str, str]] = []
+    for template in templates:
+        for num in numbers:
+            text = template.format(num=num)
+            cases.append((text, text))
+    return cases
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    _build_gou_false_positive_admin_kanji_cases(),
+)
+def test_normalize_text_gou_false_positive_admin_kanji(
+    text: str,
+    expected: str,
+):
+    """行政区画漢字を含む非住所文で NNN号 が誤変換されないことを検証する。"""
+
+    assert normalize_text(text) == expected
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    _build_gou_false_positive_building_keyword_cases(),
+)
+def test_normalize_text_gou_false_positive_building_keywords(
+    text: str,
+    expected: str,
+):
+    """建物名キーワードを含む非住所文で NNN号 が誤変換されないことを検証する。"""
+
+    assert normalize_text(text) == expected
+
+
+def test_normalize_text_standalone_address_false_positive():
+    """
+    __ADDRESS_STANDALONE_4PART_PATTERN / __ADDRESS_STANDALONE_3PART_WITH_ROOM_PATTERN が
+    住所ではない数字列パターンに誤マッチしないことを検証する。
+    """
+
+    # --- X-Y-Z-NNN（4要素）の非住所パターン ---
+    # バージョン番号
+    assert (
+        normalize_text("バージョン1-2-3-456にアップデートした")
+        == "バージョン1-2-3-456にアップデートした"
+    )
+    # 管理番号・シリアル番号
+    assert (
+        normalize_text("管理番号3-7-12-309で登録した") == "管理番号3-7-12-309で登録した"
+    )
+    # 各要素が3桁以上で日付パターン（\d{2}-\d{1,2}-\d{1,2}）に引っかからない形式を使用
+    assert (
+        normalize_text("シリアル番号100-200-300-456で管理されている")
+        == "シリアル番号100-200-300-456で管理されている"
+    )
+    # ロッカーの組み合わせ番号
+    assert normalize_text("ロッカーは4-8-2-105です") == "ロッカーは4-8-2-105です"
+    # 座席番号
+    assert (
+        normalize_text("座席番号7-2-14-100になります") == "座席番号7-2-14-100になります"
+    )
+
+    # --- X-Y-Z NNN（3要素 + 空白 + 数字）の非住所パターン ---
+    # 住所としての変換（XのYのZ...）が行われないことが重要
+    # 空白 → ポーズマーカー（'）の変換は正規化パイプラインの標準動作
+    # スポーツのスコア + 得点
+    assert (
+        normalize_text("戦績は5-3-2 200試合のものです")
+        == "戦績は5-3-2'200試合のものです"
+    )
+    # フォーメーション + 選手番号
+    assert (
+        normalize_text("フォーメーションは4-3-3 309番の選手が担当")
+        == "フォーメーションは4-3-3'309番の選手が担当"
+    )
+
+
+def test_normalize_text_gou_false_positive_composite():
+    """
+    同一テキスト内に住所文脈と非住所の NNN号 が混在するケースで、
+    非住所部分の NNN号 が桁読みに誤変換されないことを検証する。
+
+    has_address_context() の160文字窓により、前方の住所文脈が
+    後方の非住所「号」に波及する偽陽性を検出する。
+    """
+
+    # 住所 → 列車号数: 住所文脈が列車号数に波及する
+    assert (
+        normalize_text("東京都港区六本木1-2-3に届いた。こだま309号で帰る")
+        == "東京都港区六本木1の2の3に届いた.こだま309号で帰る"
+    )
+    assert (
+        normalize_text("横浜市の店舗で買い物をした後、のぞみ205号に乗った")
+        == "横浜市の店舗で買い物をした後,のぞみ205号に乗った"
+    )
+    assert (
+        normalize_text("大阪府のホテルにチェックインして、ひかり305号で東京に帰る")
+        == "大阪府のホテルにチェックインして,ひかり305号で東京に帰る"
+    )
+    # 住所文脈 + 建物名キーワード → 非住所の号
+    assert (
+        normalize_text("品川区のビルで会議をして、作品309号を納品した")
+        == "品川区のビルで会議をして,作品309号を納品した"
+    )
+    assert (
+        normalize_text("千代田区の図書館で借りた本の管理番号は409号です")
+        == "千代田区の図書館で借りた本の管理番号は409号です"
+    )
+    # 住所文脈が遠く離れた非住所「号」に波及する
+    assert (
+        normalize_text("奈良県の旅館に宿泊して翌日、連載305号の原稿を書いた")
+        == "奈良県の旅館に宿泊して翌日,連載305号の原稿を書いた"
+    )
+
+
+def test_normalize_text_gou_false_positive_sentence_boundary():
+    """
+    文境界文字による住所文脈の遮断テスト。
+
+    has_address_context() は __replace_symbols() 内から呼び出され、
+    replace_punctuation() よりも先に実行される。
+    jaconv.z2h() は先に実行済みのため「！→!」「？→?」「：→:」は半角に変換済み。
+    一方「。」(U+3002) は CJK 句読点のため z2h では変換されず、そのまま残っている。
+    そのため「。」と半角「.!?:」の両方を文境界として検出する。
+    最終出力では replace_punctuation() により「。→.」「:→,」等に変換される。
+    """
+
+    # 「。」で住所文脈が遮断される（最終出力では「.」になる）
+    assert (
+        normalize_text("東京都港区六本木1-2-3に届いた。こだま309号で帰る")
+        == "東京都港区六本木1の2の3に届いた.こだま309号で帰る"
+    )
+    # 「！」（z2h で「!」に変換済み）で住所文脈が遮断される
+    assert (
+        normalize_text("赤坂9-7-1で大事件！列車205号が遅延した")
+        == "赤坂9の7の1で大事件!列車205号が遅延した"
+    )
+    # 「？」（z2h で「?」に変換済み）で住所文脈が遮断される
+    assert (
+        normalize_text("大阪府大阪市北区梅田3-1-3は何だっけ？こだま409号に乗ろう")
+        == "大阪府大阪市北区梅田3の1の3は何だっけ?こだま409号に乗ろう"
+    )
+    # 改行で住所文脈が遮断される（最終出力では「.」になる）
+    assert (
+        normalize_text("六本木1-2-3が住所です\nチケット305号を受け取りました")
+        == "六本木1の2の3が住所です.チケット305号を受け取りました"
+    )
+    # 全角コロン「：」（z2h で「:」に変換済み）で住所文脈が遮断される
+    # 最終出力では replace_punctuation() により「:」が「,」に変換される
+    assert (
+        normalize_text("赤坂1-2-3の報告書：作品409号の出品が確認された")
+        == "赤坂1の2の3の報告書,作品409号の出品が確認された"
+    )
+    # 半角コロン「:」で住所文脈が遮断される
+    # 最終出力では replace_punctuation() により「:」が「,」に変換される
+    assert (
+        normalize_text("六本木1-2-3に住んでいる:こだま205号に乗った")
+        == "六本木1の2の3に住んでいる,こだま205号に乗った"
+    )
+    # 「、」→「,」 は文境界として扱わないケースの確認（カンマは文境界ではない）
+    # 住所文脈が「、」を挟んでも波及するケースがある（これは意図通り）
+    # ただしここでは、文境界ではない「、」で住所コンテキストが遮断されないことを確認する
+    # 住所パターン直後の建物名 + 号室は変換されるべき
+    assert (
+        normalize_text("六本木1-2-3、サクラハイツ309号室に届けてください")
+        == "六本木1の2の3,サクラハイツ'サンマルキュー号室に届けてください"
+    )
 
 
 def test_normalize_text_floor_notation():
@@ -1471,7 +2100,7 @@ def test_normalize_text_phone_postal_address_combined():
         )
         == "郵便番号ハチマルニーのゼロハチサンハチ,"
         "福岡県北九州市小倉南区石田町399の18,"
-        "石田ハイツイチマルイチテル,"
+        "石田ハイツ'イチマルイチテル,"
         "ゼロキューサン,ヨンゴーロク,ナナハチキューゼロ"
     )
 
