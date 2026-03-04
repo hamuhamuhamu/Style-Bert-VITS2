@@ -866,225 +866,6 @@ def test_normalize_text_enclosed_characters():
     assert normalize_text("㊯") == "協同組合"
 
 
-def test_normalize_text_mixed_scripts():
-    """文字種混在のテスト"""
-    # 漢字・ひらがな・カタカナの混在
-    assert (
-        normalize_text("漢字とひらがなとカタカナの混在文")
-        == "漢字とひらがなとカタカナの混在文"
-    )
-    # 英数字との混在
-    assert normalize_text("123と漢字とABCの混在") == "123と漢字とエービーシーの混在"
-    # 記号との混在
-    assert normalize_text("漢字+カタカナ=混在!?") == "漢字プラスカタカナイコール混在!?"
-    # 特殊文字との混在
-    assert normalize_text("①漢字②ひらがな③カタカナ") == "1漢字2ひらがな3カタカナ"
-    # 単位との混在
-    assert (
-        normalize_text("漢字100kg+カタカナ500m")
-        == "漢字100キログラムプラスカタカナ500メートル"
-    )
-
-
-def test_normalize_text_edge_cases():
-    """エッジケースの正規化のテスト"""
-    # 空文字列
-    assert normalize_text("") == ""
-    # 記号のみ
-    assert normalize_text("...") == "..."
-    assert normalize_text("!!!") == "!!!"
-    assert normalize_text("???") == "???"
-    # 数字のみ
-    assert normalize_text("12345") == "12345"
-
-    # 結合文字の濁点・半濁点
-    assert normalize_text("か゛") == "か"  # 結合文字の濁点は削除
-    assert normalize_text("は゜") == "は"  # 結合文字の半濁点は削除
-
-    # 数字と数字の間のスペースは ' に変換される（数字連結防止）
-    # "5090 32" が "509032" になって「ゴジュウマンキュウセンサンジュウニ」と読まれるのを防ぐ
-    assert normalize_text("RTX 5090 32GB") == "アールティーエックス5090'32ギガバイト"
-    assert (
-        # H100 の H は単独では変換されない
-        normalize_text("H100 96GB") == "H100'96ギガバイト"
-    )
-    assert normalize_text("100 200 300") == "100'200'300"
-    # 英字と数字の間のスペースは連結しても問題ないため変換不要
-    assert normalize_text("RTX 5090") == "アールティーエックス5090"
-
-    # 極端に長い数値
-    assert normalize_text("12345678901234567890") == "12345678901234567890"
-    # 極端に長い英単語
-    assert (
-        normalize_text("supercalifragilisticexpialidocious")
-        == "スーパーカリフラジリー"  # e2k ライブラリによる自動推定結果
-    )
-    # 特殊な文字の組み合わせ
-    assert normalize_text("㊊㊋㊌㊍㊎㊏㊐") == "月火水木金土日"  # 曜日の丸文字
-    assert (
-        normalize_text("㍉㌔㌢㍍㌘㌧㌃㌶㍑㍗")
-        == "ミリキロセンチメートルグラムトンアールヘクタールリットルワット"
-    )
-
-
-def test_normalize_text_complex():
-    """複合的なパターンの正規化のテスト"""
-    # 日付・時刻・単位を含む文
-    assert (
-        normalize_text("2024/01/01(月)の14時30分に1.5kgの荷物を受け取った。")
-        == "2024年1月1日月曜日の十四時三十分に1.5キログラムの荷物を受け取った."
-    )
-    assert (
-        normalize_text("MacBookで1080p/60fpsの動画を2GB保存した。")
-        == "マックブックで1080p/60エフピーエスの動画を2ギガバイト保存した."
-    )
-    assert (
-        normalize_text("¥1,000の商品を2個買うと、¥2,000です（1,000×2=2,000）。")
-        == "1000円の商品を2個買うと,2000円です'1000かける2イコール2000'."
-    )
-    assert (
-        normalize_text(
-            "お問い合わせは、info@example.comまたはhttps://example.com/contactまで！"
-        )
-        == "お問い合わせは,インフォ,アットマーク,イグザンプルドットコムまたはエイチティーティーピーエス,イグザンプルドットコム,スラッシュ,コンタクトまで!"
-    )
-    assert (
-        normalize_text("09:30に家を出発し、2km先のスーパーで500gのお肉を買った。")
-        == "九時三十分に家を出発し,2キロメートル先のスーパーで500グラムのお肉を買った."
-    )
-    assert (
-        normalize_text(
-            "2024/05/01にWindowsのアップデート（2GB+500MB=2.5GB）を実施する。"
-        )
-        == "2024年5月1日にウィンドウズのアップデート'2ギガバイトプラス500メガバイトイコール2.5ギガバイト'を実施する."
-    )
-    assert (
-        normalize_text(
-            "CPU使用率が50%を超え、メモリ消費が2GBに達した時点で、Windows Serverは自動的に再起動します。"
-        )
-        == "シーピーユー使用率が50パーセントを超え,メモリ消費が2ギガバイトに達した時点で,ウィンドウズサーバーは自動的に再起動します."
-    )
-    assert (
-        normalize_text(
-            "新商品のiPhone 15 Pro Max (256GB)が¥158,000(税込)で発売！9/22(金)午前10時から予約受付開始。"
-        )
-        == "新商品のアイフォン15プロマックス'256ギガバイト'が158000円'税込'で発売!9月22日金曜日午前10時から予約受付開始."
-    )
-    assert (
-        normalize_text(
-            "株式会社Deeptest(担当：山田)様、10/1(月)15:00〜17:00にWeb会議(https://meet.example.com/test)を設定しました。"
-        )
-        == "株式会社ディープテスト'担当,山田'様,10月1日月曜日十五時から十七時にウェブ会議'エイチティーティーピーエス,ミートドット,イグザンプルドットコム,スラッシュ,テスト'を設定しました."
-    )
-    assert (
-        normalize_text(
-            "材料(4人分)：牛肉250g、玉ねぎ1個、水300mL、醤油大さじ2(30mL)、砂糖20g。"
-        )
-        == "材料'4人分',牛肉250グラム,玉ねぎ1個,水300ミリリットル,醤油大さじ2'30ミリリットル',砂糖20グラム."
-    )
-    assert (
-        normalize_text(
-            "2つの数 a, b があり、a:b = 2:3 で、a + b = 10 のとき、a = 4, b = 6 となります。"
-        )
-        == "2つの数a,bがあり,a,bイコール二タイ三で,aプラスbイコール10のとき,aイコール4,bイコール6となります."
-    )
-    assert (
-        normalize_text(
-            "JavaScriptでArray.prototype.map()を使用し、配列の要素を2倍にする処理を1/100秒で実行。"
-        )
-        == "ジャバスクリプトでアレイプロトタイプマップ''を使用し,配列の要素を2倍にする処理を百ぶんの一秒で実行."
-    )
-    assert (
-        normalize_text(
-            "今日01/03（月）にですね、16:9の映像を1/128の確率で表示するイベントをやっていて、85/09/30の08月01日(金)にお会いした人と久々に会うんです"
-        )
-        == "今日1月3日月曜日にですね,十六タイ九の映像を百二十八ぶんの一の確率で表示するイベントをやっていて,1985年9月30日の8月1日金曜日にお会いした人と久々に会うんです"
-    )
-    assert (
-        normalize_text(
-            "path-to-model-file.onnx は事前学習済みの onnx モデルファイルです。 onnx_model/phoneme_transition_model.onnxにあります。 path-to-wav-file はサンプリング周波数 16kHz  のモノラル wav ファイルです。 path-to-phoneme-file は音素を空白区切りしたテキストが格納されたファイルのパスです。 NOTE: 開始音素と終了音素は pau である必要があります。"
-        )
-        == "パストゥーモデルファイルオニキスは事前学習済みのオニキスモデルファイルです.オニキスモデル/フォーニムトランジションモデルオニキスにあります.パストゥーワブファイルはサンプリング周波数16キロヘルツのモノラルワブファイルです.パストゥーフォーニムファイルは音素を空白区切りしたテキストが格納されたファイルのパスです.ノート,開始音素と終了音素はパウである必要があります."
-    )
-    assert (
-        normalize_text(
-            "Apple Watch Series 10も安くなっている。Amazonでの 販売価格は、昨年発売された新モデルということもあり、過去最安値となっている。42mmのジェットブラックモデル（Wi-Fi）の場合、5％OFFの\\53,693＋537ポイントで販売している。ヨドバシ.comとビックカメラ.comでもセール対象となっており、ポイント還元分を含んだ実質価格はAmazonと同等だ。"
-        )
-        == "アップルウォッチシリーズテンも安くなっている.アマゾンでの販売価格は,昨年発売された新モデルということもあり,過去最安値となっている.42ミリメートルのジェットブラックモデル'ワイファイ'の場合,5パーセントオフの53693円プラス537ポイントで販売している.ヨドバシ.コムとビックカメラ.コムでもセール対象となっており,ポイント還元分を含んだ実質価格はアマゾンと同等だ."
-    )
-    assert (
-        normalize_text(
-            "音質面では、8W×2基のスピーカーを搭載。立体音響フォーマットはDTS:Xに対応し、バーチャルサウンド技術のDTS:Virtualサウンドを活用した再生も可能だという。Google TVが導入されているため、YouTube／Prime Video／Netflixといった多数のVODサービスが楽しめる他、音声操作のGoogleアシスタントbuilt-in、スマートフォンなどのデバイスからテレビに映像をキャストするChromecast built-inなども採用されている。ユニボディデザインに極上メタリックフレームを採用したプレミアムなデザインも特徴的。付属リモコンは、Bluetooth接続タイプが投入されている。ワイヤレス機能は、Bluetooth ver5.0、Wi-Fi（5GHz/2.4GHz）に対応する。"
-        )
-        == "音質面では,8Wかける2基のスピーカーを搭載.立体音響フォーマットはディーティーエス,Xに対応し,バーチャルサウンド技術のディーティーエス,バーチャルサウンドを活用した再生も可能だという.グーグルティービーが導入されているため,ユーチューブ/プライムビデオ/ネットフリックスといった多数のブイーオーディーサービスが楽しめる他,音声操作のグーグルアシスタントビルトイン,スマートフォンなどのデバイスからテレビに映像をキャストするクロームキャストビルトインなども採用されている.ユニボディデザインに極上メタリックフレームを採用したプレミアムなデザインも特徴的.付属リモコンは,ブルートゥース接続タイプが投入されている.ワイヤレス機能は,ブルートゥースバー5.0,ワイファイ'5ギガヘルツ/2.4ギガヘルツ'に対応する."
-    )
-    assert (
-        normalize_text(
-            "Scopely（スコープリー）は『モノポリーGO』や『マーベル・ストライクフォース』などを配信している、アメリカのモバイルゲーム会社。2023年にサウジアラビアのSavvy Games Groupに49億ドルで買収されている。 一方のナイアンティックは、前述のゲーム事業の売却に合わせて、新会社となる”Niantic Spatial Inc.”（ナイアンティックスペーシャル）を設立。ジオスペーシャルAI事業として、空間コンピューティング、XR、地理情報システム（GIS）、AIを統合した、新たなプラットフォーム”Niantic Spatial Platform”へ注力するという。なお、『ポケモンGO』や『モンスターハンターNow』、『ピクミンブルーム』の事業はスコープリーへ移管されるものの、『Ingress Prime』や『Peridot』などの現実世界を舞台にしたARゲームは引き続き、ナイアンティック側で運営を行う。"
-        )
-        == "スコープリー'スコープリー'はモノポリーゴーやマーベル,ストライクフォースなどを配信している,アメリカのモバイルゲーム会社.2023年にサウジアラビアのサヴィゲームズグループに49億ドルで買収されている.一方のナイアンティックは,前述のゲーム事業の売却に合わせて,新会社となる'ナイアンティックスペイシャルインク.''ナイアンティックスペーシャル'を設立.ジオスペーシャルエーアイ事業として,空間コンピューティング,エックスアール,地理情報システム'ジーアイエス',エーアイを統合した,新たなプラットフォーム'ナイアンティックスペイシャルプラットフォーム'へ注力するという.なお,ポケモンゴーやモンスターハンターナウ,ピクミンブルームの事業はスコープリーへ移管されるものの,イングレスプライムやペリドットなどの現実世界を舞台にしたエーアールゲームは引き続き,ナイアンティック側で運営を行う."
-    )
-    assert (
-        normalize_text(
-            "ROCK5 is a series of Rockchip RK3588(s) based SBC(Single Board Computer) by Radxa. It can run Linux, Android, BSD and other distributions. ROCK5 comes in two models, Model A and Model B. Both models offer 4GB, 8GB, 16GB and 32GB options. For detailed difference between Model A and Model B, please check Specifications. ROCK5 features a Octa core ARM processor(4x Cortex-A76 + 4x Cortex-A55), 64bit 3200Mb/s LPDDR4, up to 8K@60 HDMI, MIPI DSI, MIPI CSI, 3.5mm jack with mic, USB Port, 2.5 GbE LAN, PCIe 3.0, PCIe 2.0, 40-pin color expansion header, RTC. Also, ROCK5 supports USB PD and QC powering."
-        )
-        == "ロックファイブイズアシリーズオブロックチップRK3588's'ベースドエスビーシー'シングルボードコンピューター'バイラダ.イットキャンランリナックス,アンドロイド,ビーエスディーアンドアザーディストリビューションズ.ロックファイブカムズインツーモデルズ,モデルAアンドモデルB.ボスモデルズオファー4ギガバイト,8ギガバイト,16ギガバイトアンド32ギガバイトオプションズ.フォーディテールズディファレンスビトゥイーンモデルAアンドモデルB,プリーズチェックスペシフィケーションズ.ロックファイブフィーチャーズアオクタコアアームプロセッサー'4xコーテックスA76プラス4xコーテックスA55',64ビット3200メガビット毎秒エルピーディーディーアールフォー,アップトゥーはちケー60エイチディーエムアイ,ミピーディーエスアイ,ミピーシーエスアイ,3.5ミリメートルジャックウィズマイク,ユーエスビーポート,2.5ジービーイーラン,ピーシーアイイー3.0,ピーシーアイイー2.0,40ピンカラーエクスパンションヘッダー,アールティーシー.オルソ,ロックファイブサポーツユーエスビーピーディーアンドキューシーパワーリング."
-    )
-
-
-def test_normalize_text_itaiji():
-    """異体字・旧字体→新字体の変換テスト"""
-
-    # 基本的な旧字体→新字体の変換
-    assert normalize_text("學校") == "学校"
-    assert normalize_text("國語") == "国語"
-    assert normalize_text("經濟") == "経済"
-    assert normalize_text("醫學") == "医学"
-    assert normalize_text("圖書館") == "図書館"
-    assert normalize_text("鐵道") == "鉄道"
-    assert normalize_text("歷史") == "歴史"
-    assert normalize_text("實驗") == "実験"
-    assert normalize_text("體育") == "体育"
-    assert normalize_text("變化") == "変化"
-
-    # 旧字体を含む文
-    assert normalize_text("國語の學校で勉強する。") == "国語の学校で勉強する."
-    assert normalize_text("圖書館で經濟學を學ぶ。") == "図書館で経済学を学ぶ."
-    assert normalize_text("醫學部の實驗は嚴しい。") == "医学部の実験は厳しい."
-
-    # 新字体のみの文はそのまま通過する
-    assert normalize_text("学校で勉強する。") == "学校で勉強する."
-    assert normalize_text("図書館で本を読む。") == "図書館で本を読む."
-
-    # 旧字体と新字体が混在する文
-    assert normalize_text("學校と図書館で勉強する。") == "学校と図書館で勉強する."
-
-    # 旧字体と他の正規化処理が組み合わさるケース
-    # 旧字体変換 + 日付正規化
-    assert normalize_text("2024/01/01に學校へ行く。") == "2024年1月1日に学校へ行く."
-    # 旧字体変換 + 英単語カタカナ変換
-    assert normalize_text("經濟のNewsを讀む。") == "経済のニューズを読む."
-    # 旧字体変換 + 単位変換
-    assert normalize_text("學校まで3km歩く。") == "学校まで3キロメートル歩く."
-
-    # 複数の旧字体が連続するケース
-    assert normalize_text("國際經濟學") == "国際経済学"
-    assert normalize_text("勸業銀行") == "勧業銀行"
-    assert normalize_text("總務省") == "総務省"
-    assert normalize_text("辯護士") == "弁護士"
-    assert normalize_text("營業權") == "営業権"
-
-    # 辨・瓣・辯 はいずれも「弁」に変換される
-    assert normalize_text("辨當") == "弁当"
-    assert normalize_text("花瓣") == "花弁"
-    assert normalize_text("辯論") == "弁論"
-
-    # 旧字体が含まれる固有名詞的な用例
-    assert normalize_text("龍が如く") == "竜が如く"
-    assert normalize_text("櫻の花が咲く。") == "桜の花が咲く."
-    assert normalize_text("澤山の寶物") == "沢山の宝物"
-
-
 def test_normalize_text_phone_numbers():
     """
     電話番号の正規化のテスト
@@ -1310,7 +1091,7 @@ def test_normalize_text_addresses():
       1→イチ, 2→ニー, 3→サン, 4→ヨン, 5→ゴー,
       6→ロク, 7→ナナ, 8→ハチ, 9→キュー
       3桁の中間0は「マル」と読むが、4桁以上の中間0は「ゼロ」と読む。
-      例: 409→ヨンマルキュー, 1409→イチヨンゼロキュー
+      例: 409→ヨンマルキュー, 1203→イチニーゼロサン
     号室末尾は伸ばさない:
       部屋番号の末尾が 2 または 5 の場合、短く読む（ニ, ゴ）。
       住所の最後なので韻を踏む必要がないため。
@@ -1348,12 +1129,12 @@ def test_normalize_text_addresses():
     assert normalize_text("六本木1-2-3") == "六本木1の2の3"
 
     # --- 住居表示 + 部屋番号（4要素目が3桁以上なら桁読み） ---
-    assert normalize_text("赤坂1-2-3-409") == "赤坂1の2の3のヨンマルキュー"
+    assert normalize_text("赤坂1-2-3-609") == "赤坂1の2の3のロクマルキュー"
     # 部屋番号の0の読み方: 先頭・末尾→ゼロ、中間→マル
     assert normalize_text("赤坂1-2-3-410") == "赤坂1の2の3のヨンイチゼロ"
     assert normalize_text("赤坂1-2-3-041") == "赤坂1の2の3のゼロヨンイチ"
-    assert normalize_text("赤坂1-2-3-101") == "赤坂1の2の3のイチマルイチ"
-    assert normalize_text("赤坂1-2-3-301") == "赤坂1の2の3のサンマルイチ"
+    assert normalize_text("赤坂1-2-3-102") == "赤坂1の2の3のイチマルニ"
+    assert normalize_text("赤坂1-2-3-304") == "赤坂1の2の3のサンマルヨン"
     # 4桁の部屋番号
     assert normalize_text("赤坂1-2-3-1001") == "赤坂1の2の3のイチゼロゼロイチ"
     assert normalize_text("赤坂1-2-3-1409") == "赤坂1の2の3のイチヨンゼロキュー"
@@ -1391,9 +1172,36 @@ def test_normalize_text_addresses():
     # 3要素 + 空白 + 号/号室: 接尾辞ありの場合のみ変換する
     assert normalize_text("2-11-3 309号") == "2の11の3のサンマルキュー号"
     assert normalize_text("2-11-3 1205号室") == "2の11の3のイチニーゼロゴ号室"
+    # 文頭以外でも、住所文脈（明示語彙）があれば standalone 住所を変換する
+    assert (
+        normalize_text("住所は2-11-3 309号です")
+        == "住所は2の11の3のサンマルキュー号です"
+    )
     assert (
         normalize_text("プラウド武蔵小杉1205号室")
         == "プラウド武蔵小杉'イチニーゼロゴ号室"
+    )
+    # 住所 + 建物固有名詞 + 号 / 号室
+    assert (
+        normalize_text(
+            "神奈川県川崎市幸区鹿島田3-105 パークハイム鹿島田スカイタワー 809号"
+        )
+        == "神奈川県川崎市幸区鹿島田3の105,パークハイム鹿島田スカイタワー'ハチマルキュー号"
+    )
+    assert (
+        normalize_text(
+            "神奈川県川崎市幸区鹿島田3-105 パークハイム鹿島田スカイタワー 809号室"
+        )
+        == "神奈川県川崎市幸区鹿島田3の105,パークハイム鹿島田スカイタワー'ハチマルキュー号室"
+    )
+    # 県や市を省略しても問題なく変換される
+    assert (
+        normalize_text("川崎市幸区鹿島田3-105 パークハイム鹿島田スカイタワー 809号室")
+        == "川崎市幸区鹿島田3の105,パークハイム鹿島田スカイタワー'ハチマルキュー号室"
+    )
+    assert (
+        normalize_text("高津区溝口2-34-5 パークタワー溝口 1009号室")
+        == "高津区溝口2の34の5,パークタワー溝口'イチゼロゼロキュー号室"
     )
 
     # --- 文中の住所 ---
@@ -1503,8 +1311,8 @@ def test_normalize_text_room_number_digit_patterns():
         == "プラウド武蔵小杉'イチニーゼロゴ号室"
     )
     assert (
-        normalize_text("ネクサス鹿島田1409号室")
-        == "ネクサス鹿島田'イチヨンゼロキュー号室"
+        normalize_text("ネクサス鹿島田1607号室")
+        == "ネクサス鹿島田'イチロクゼロナナ号室"
     )
     assert normalize_text("サクラコート1302号") == "サクラコート'イチサンゼロニ号"
     assert (
@@ -1514,16 +1322,16 @@ def test_normalize_text_room_number_digit_patterns():
 
     # ========== 住所 + 建物名 + 号室 の複合テスト（ハードコード期待値） ==========
     assert (
-        normalize_text("東京都港区六本木1-2-3 サクラハイツ409号室")
-        == "東京都港区六本木1の2の3,サクラハイツ'ヨンマルキュー号室"
+        normalize_text("東京都港区六本木1-2-3 サクラハイツ604号室")
+        == "東京都港区六本木1の2の3,サクラハイツ'ロクマルヨン号室"
     )
     assert (
         normalize_text("大阪府大阪市北区梅田3-1-3 グリーンコート1205号室")
         == "大阪府大阪市北区梅田3の1の3,グリーンコート'イチニーゼロゴ号室"
     )
     assert (
-        normalize_text("赤坂9-7-1 パークタワー1409号")
-        == "赤坂9の7の1,パークタワー'イチヨンゼロキュー号"
+        normalize_text("赤坂9-7-1 パークタワー1108号")
+        == "赤坂9の7の1,パークタワー'イチイチゼロハチ号"
     )
     assert (
         normalize_text("六本木1-2-3 フォレストタワー502号室")
@@ -1539,361 +1347,6 @@ def test_normalize_text_room_number_digit_patterns():
         normalize_text("静岡県焼津市岡当目588-15 プラウド焼津1205号室")
         == "静岡県焼津市岡当目588の15,プラウド焼津'イチニーゼロゴ号室"
     )
-
-
-def _convert_room_digits_for_expected(digits: str) -> str:
-    """号室・部屋番号の期待値生成用ヘルパー。"""
-
-    digit_to_katakana = {
-        "0": "ゼロ",
-        "1": "イチ",
-        "2": "ニー",
-        "3": "サン",
-        "4": "ヨン",
-        "5": "ゴー",
-        "6": "ロク",
-        "7": "ナナ",
-        "8": "ハチ",
-        "9": "キュー",
-    }
-    digit_to_short = {
-        "2": "ニ",
-        "5": "ゴ",
-    }
-
-    # 3桁の部屋番号のみ中間 0 をマルと読む
-    # 4桁以上の部屋番号では中間 0 もゼロと読む
-    ## 例: 3桁 "409" → ヨンマルキュー, 4桁 "1409" → イチヨンゼロキュー
-    is_use_maru = len(digits) == 3
-
-    converted = ""
-    for index, digit in enumerate(digits):
-        is_first = index == 0
-        is_last = index == len(digits) - 1
-        # 中間 0 はマルにする（3桁かつ前後がともに非 0 の場合のみ）
-        if (
-            is_use_maru is True
-            and is_first is False
-            and is_last is False
-            and digit == "0"
-            and digits[index - 1] != "0"
-            and digits[index + 1] != "0"
-        ):
-            converted += "マル"
-            continue
-        # 末尾の 2 / 5 は短く読む
-        if is_last is True and digit in digit_to_short:
-            converted += digit_to_short[digit]
-            continue
-        converted += digit_to_katakana[digit]
-    return converted
-
-
-def _build_room_context_positive_cases() -> list[tuple[str, str]]:
-    """住所 + 建物名 + 号 / 号室 の大量ケースを生成する。"""
-
-    address_cases = [
-        ("神奈川県川崎市幸区鹿島田1-34-5", "神奈川県川崎市幸区鹿島田1の34の5"),
-        ("東京都港区赤坂1-2-3", "東京都港区赤坂1の2の3"),
-        ("大阪府大阪市北区梅田3-1-3", "大阪府大阪市北区梅田3の1の3"),
-        ("福岡県北九州市小倉南区石田町399-18", "福岡県北九州市小倉南区石田町399の18"),
-        ("宮城県仙台市若林区裏柴田町36-1", "宮城県仙台市若林区裏柴田町36の1"),
-        ("静岡県焼津市岡当目588-15", "静岡県焼津市岡当目588の15"),
-        ("奈良県桜井市鹿路341-18", "奈良県桜井市鹿路341の18"),
-        ("六本木1-2-3", "六本木1の2の3"),
-        ("赤坂9-7-1", "赤坂9の7の1"),
-        ("神奈川県川崎市幸区鹿島田１−３４−５", "神奈川県川崎市幸区鹿島田1の34の5"),
-    ]
-    building_names = [
-        "パークハイム鹿島田第一",
-        "プラウド武蔵小杉",
-        "鹿島田第一",
-        "ネクサス鹿島田",
-        "サクラコート",
-        "フォレストタワー",
-    ]
-    room_numbers = [
-        # 3桁: 中間0→マル
-        "101",  # イチマルイチ
-        "204",  # ニーマルヨン（先頭1モーラ数字2）
-        "309",  # サンマルキュー
-        "405",  # ヨンマルゴ（末尾1モーラ数字5→ゴ）
-        "502",  # ゴーマルニ（先頭1モーラ数字5、末尾1モーラ数字2→ニ）
-        "802",  # ハチマルニ（末尾1モーラ数字2→ニ）
-        # 3桁: 0なし
-        "123",  # イチニーサン
-        "789",  # ナナハチキュー
-        # 3桁: 先頭・末尾0→ゼロ
-        "100",  # イチゼロゼロ（連続0）
-        "410",  # ヨンイチゼロ（末尾0）
-        # 4桁: 中間0→ゼロ（マルではない）
-        "1205",  # イチニーゼロゴ（末尾1モーラ数字5→ゴ）
-        "1409",  # イチヨンゼロキュー
-        "1302",  # イチサンゼロニ（末尾1モーラ数字2→ニ）
-        "1001",  # イチゼロゼロイチ（連続0）
-        "2505",  # ニーゴーゼロゴ（先頭・中間に1モーラ数字）
-    ]
-    suffixes = [
-        "号",
-        "号室",
-    ]
-    spaces = [
-        " ",
-    ]
-
-    cases: list[tuple[str, str]] = []
-    for address_input, normalized_address in address_cases:
-        for space_between_address_and_building in spaces:
-            for building_name in building_names:
-                for space_between_building_and_room in spaces:
-                    for room_number in room_numbers:
-                        room_katakana = _convert_room_digits_for_expected(room_number)
-                        for suffix in suffixes:
-                            text = (
-                                f"{address_input}"
-                                f"{space_between_address_and_building}"
-                                f"{building_name}"
-                                f"{space_between_building_and_room}"
-                                f"{room_number}{suffix}"
-                            )
-                            expected = (
-                                f"{normalized_address},{building_name}"
-                                f"'{room_katakana}{suffix}"
-                            )
-                            cases.append((text, expected))
-    return cases
-
-
-def _build_room_context_negative_cases() -> list[tuple[str, str]]:
-    """住所文脈がない 号 の非変換ケースを大量生成する。"""
-
-    prefixes = [
-        "こだま",
-        "のぞみ",
-        "ひかり",
-        "特急",
-        "急行",
-        "第",
-        "作品",
-        "問題",
-        "章",
-        "話",
-        "案件",
-        "型番",
-        "規格",
-        "便",
-        "列車",
-        "ルール",
-        "プロトコル",
-        "プレイリスト",
-        "任務",
-        "講義",
-        "イベント",
-        "チャンネル",
-        "プラン",
-        "フォーマット",
-        "テンプレート",
-        "シリーズ",
-        "ファイル",
-        "プロジェクト",
-        "テスト",
-        "モデル",
-    ]
-    room_numbers = [
-        "101",
-        "204",
-        "309",
-        "405",
-        "502",
-        "1205",
-        "1409",
-        "1302",
-    ]
-    suffixes = [
-        "号",
-    ]
-
-    cases: list[tuple[str, str]] = []
-    for prefix in prefixes:
-        for room_number in room_numbers:
-            for suffix in suffixes:
-                text = f"{prefix}{room_number}{suffix}を参照してください"
-                expected = text
-                cases.append((text, expected))
-    return cases
-
-
-@pytest.mark.parametrize(
-    ("text", "expected"),
-    _build_room_context_positive_cases(),
-)
-def test_normalize_text_room_context_positive_massive(text: str, expected: str):
-    """住所文脈ありの 号 / 号室 の正規化を大量ケースで検証する。"""
-
-    assert normalize_text(text) == expected
-
-
-@pytest.mark.parametrize(
-    ("text", "expected"),
-    _build_room_context_negative_cases(),
-)
-def test_normalize_text_room_context_negative_massive(text: str, expected: str):
-    """住所文脈なしの 号 の誤変換を大量ケースで検証する。"""
-
-    assert normalize_text(text) == expected
-
-
-# =========================================================================
-# 偽陽性テスト: 住所文脈ではないのに号が桁読みに誤変換されるケース
-# has_address_context() の誤判定を検出するためのテスト群
-# =========================================================================
-
-
-def _build_gou_false_positive_admin_kanji_cases() -> list[tuple[str, str]]:
-    """
-    行政区画漢字（都道府県市区町村）を含むが住所文脈ではない文で、
-    NNN号 が桁読みに誤変換されないことを検証するケースを生成する。
-
-    has_address_context() の __ADDRESS_CONTEXT_PATTERN が単漢字マッチのため、
-    「市場」「区別」「北海道」等の非住所語に含まれる漢字で偽陽性が発生する。
-    """
-
-    # {num} に数字を埋め込み、{num}号 が変換されないことを確認する
-    # 各テンプレートには行政区画漢字を含む非住所語が含まれている
-    templates = [
-        # 「市」: 市場, 市民, 都市, 市販, 闇市, 朝市, 市街地, 市長
-        "市場で{num}号の整理券を受け取った",
-        "市民ホールで公演{num}号が開催された",
-        "都市計画のプロジェクト{num}号を推進する",
-        "市販の製品カタログ{num}号を確認した",
-        "闇市で仕入れた品物の管理タグ{num}号がある",
-        "朝市で整理券{num}号を配布している",
-        "市街地で特別列車{num}号を見かけた",
-        "市長が法案{num}号に署名した",
-        # 「区」: 区別, 区間, 地区, 学区, 区画, 特区
-        "区別がつかないので識別番号{num}号を振った",
-        "区間快速の列車{num}号に乗った",
-        "地区大会で選手番号{num}号が優勝した",
-        "学区の会報誌{num}号が届いた",
-        "区画整理の事業認可{num}号が下りた",
-        "特区に指定された施設の登録番号{num}号です",
-        # 「町」: 下町, 城下町, 門前町, 町内, 町工場
-        "下町の店で整理券{num}号を配布した",
-        "城下町を散策して記念コイン{num}号を購入した",
-        "門前町の伝統祭りでくじ{num}号を引いた",
-        "町内会の回覧板{num}号を回してください",
-        "町工場で部品{num}号を製造している",
-        # 「村」: 村上, 村田, 農村, 漁村, 山村
-        "村上春樹の短編集で作品{num}号が好きだ",
-        "村田製作所の製品カタログ{num}号を確認した",
-        "農村の暮らしを描いた絵画{num}号が入賞した",
-        "漁村で水揚げされた漁獲管理番号{num}号を確認した",
-        "山村留学のパンフレット{num}号を取り寄せた",
-        # 「道」: 北海道, 柔道, 書道, 鉄道, 水道, 歩道, 茶道
-        "北海道の名産品カタログ{num}号を取り寄せた",
-        "柔道の段位証書{num}号を授与された",
-        "書道展に出品された作品{num}号が入賞した",
-        "鉄道ファンの雑誌{num}号を購読している",
-        "水道の検査レポート{num}号を提出した",
-        "歩道の改善要望書{num}号が受理された",
-        "茶道の免状で認定番号{num}号を受けた",
-        # 「府」: 政府, 幕府, 府中, 内閣府
-        "政府が発表した政令{num}号を確認した",
-        "幕府が発布した法令{num}号を調査した",
-        "府中の競馬場でレース{num}号が開催された",
-        "内閣府の告示{num}号を参照してください",
-        # 「県」: 県庁, 県民, 県警, 県道
-        "県庁で申請書{num}号を提出した",
-        "県民アンケート{num}号を集計した",
-        "県警が捜査資料{num}号を公開した",
-        "県道の標識を管理番号{num}号で登録した",
-        # 「都」: 都合, 首都, 都営, 都心, 都度
-        "都合が悪いので予約{num}号をキャンセルした",
-        "首都高速の路線{num}号が渋滞している",
-        "都営バスの系統{num}号に乗車した",
-        "都心で開催されたイベントのブース{num}号に出展した",
-        "都度払いで請求書{num}号を発行した",
-    ]
-
-    numbers = ["309", "205", "1205"]
-
-    cases: list[tuple[str, str]] = []
-    for template in templates:
-        for num in numbers:
-            text = template.format(num=num)
-            # 期待値: NNN号 が桁読みに変換されない（入力と同一）
-            cases.append((text, text))
-    return cases
-
-
-def _build_gou_false_positive_building_keyword_cases() -> list[tuple[str, str]]:
-    """
-    建物名キーワード（タワー, ビル, 館 等）を含むが住所文脈ではない文で、
-    NNN号 が桁読みに誤変換されないことを検証するケースを生成する。
-
-    has_address_context() の __BUILDING_NAME_PATTERN が部分一致のため、
-    「東京タワー」「体育館」「ビルド」等の非建物名語に含まれるキーワードで偽陽性が発生する。
-    """
-
-    templates = [
-        # 「タワー」: 東京タワー, タワーレコード, タワーディフェンス
-        "東京タワーの入場券{num}号を持っている",
-        "タワーレコードの注文番号{num}号が発送された",
-        "タワーディフェンスゲームのステージ{num}号をクリアした",
-        # 「ビル」: ビルド, ビルダー, ビル（人名）
-        "ビルドエラーのチケット{num}号を修正した",
-        "ビルダーパターンのプルリクエスト{num}号をマージした",
-        # 「館」: 体育館, 図書館, 映画館, 美術館, 水族館, 博物館
-        "体育館でロッカー番号{num}号を使った",
-        "図書館の蔵書番号{num}号を借りた",
-        "映画館でシアター{num}号に入場した",
-        "美術館の展示品番号{num}号が修復中だ",
-        "水族館のチケット{num}号で入場した",
-        "博物館の収蔵品{num}号を展示する予定だ",
-        # 「荘」: 荘厳, 荘園
-        "荘厳な雰囲気の演奏会プログラム{num}号が始まった",
-        "荘園の歴史を記した文献{num}号を参照した",
-        # 「コート」: テニスコート, バスケットボールコート, コート（衣類）
-        "テニスコートの利用予約番号{num}号を取った",
-        "コートを着て外出し整理券{num}号を受け取った",
-        # 「棟」: 棟梁
-        "棟梁が手がけた建築の文化財指定{num}号を受けた",
-    ]
-
-    numbers = ["309", "205", "1205"]
-
-    cases: list[tuple[str, str]] = []
-    for template in templates:
-        for num in numbers:
-            text = template.format(num=num)
-            cases.append((text, text))
-    return cases
-
-
-@pytest.mark.parametrize(
-    ("text", "expected"),
-    _build_gou_false_positive_admin_kanji_cases(),
-)
-def test_normalize_text_gou_false_positive_admin_kanji(
-    text: str,
-    expected: str,
-):
-    """行政区画漢字を含む非住所文で NNN号 が誤変換されないことを検証する。"""
-
-    assert normalize_text(text) == expected
-
-
-@pytest.mark.parametrize(
-    ("text", "expected"),
-    _build_gou_false_positive_building_keyword_cases(),
-)
-def test_normalize_text_gou_false_positive_building_keywords(
-    text: str,
-    expected: str,
-):
-    """建物名キーワードを含む非住所文で NNN号 が誤変換されないことを検証する。"""
-
-    assert normalize_text(text) == expected
 
 
 def test_normalize_text_standalone_address_false_positive():
@@ -1937,6 +1390,15 @@ def test_normalize_text_standalone_address_false_positive():
         normalize_text("フォーメーションは4-3-3 309番の選手が担当")
         == "フォーメーションは4-3-3'309番の選手が担当"
     )
+    # 接尾辞が「号」であっても、非住所文脈では住所変換しない
+    # またこのようにスペースを削除すると数字同士が隣り合うパターンでは ' を入れる
+    assert normalize_text("試合結果5-3-2 309号を記録") == "試合結果5の3の2'309号を記録"
+    # 3桁超の数字でも同様に数字連結を防ぐ
+    assert normalize_text("試合結果5-3-2 2309を記録") == "試合結果5の3の2'2309を記録"
+    # 桁区切りカンマを含む数字でも、先頭境界の ' は維持したまま数字のカンマだけ除去する
+    assert normalize_text("試合結果5-3-2 1,000を記録") == "試合結果5の3の2'1000を記録"
+    # 2要素住所変換（X-Y）でも、後続の数字と連結しない
+    assert normalize_text("区画3-2 100を確認") == "区画3の2'100を確認"
 
 
 def test_normalize_text_gou_false_positive_composite():
@@ -1967,8 +1429,12 @@ def test_normalize_text_gou_false_positive_composite():
         == "品川区のビルで会議をして,作品309号を納品した"
     )
     assert (
-        normalize_text("千代田区の図書館で借りた本の管理番号は409号です")
-        == "千代田区の図書館で借りた本の管理番号は409号です"
+        normalize_text("バージョン1-2-3 beta 309号を確認した")
+        == "バージョン1-2-3ベータ309号を確認した"
+    )
+    assert (
+        normalize_text("千代田区の図書館で借りた本の管理番号は603号です")
+        == "千代田区の図書館で借りた本の管理番号は603号です"
     )
     # 住所文脈が遠く離れた非住所「号」に波及する
     assert (
@@ -2001,8 +1467,8 @@ def test_normalize_text_gou_false_positive_sentence_boundary():
     )
     # 「？」（z2h で「?」に変換済み）で住所文脈が遮断される
     assert (
-        normalize_text("大阪府大阪市北区梅田3-1-3は何だっけ？こだま409号に乗ろう")
-        == "大阪府大阪市北区梅田3の1の3は何だっけ?こだま409号に乗ろう"
+        normalize_text("大阪府大阪市北区梅田3-1-3は何だっけ？こだま334号に乗ろう")
+        == "大阪府大阪市北区梅田3の1の3は何だっけ?こだま334号に乗ろう"
     )
     # 改行で住所文脈が遮断される（最終出力では「.」になる）
     assert (
@@ -2012,8 +1478,8 @@ def test_normalize_text_gou_false_positive_sentence_boundary():
     # 全角コロン「：」（z2h で「:」に変換済み）で住所文脈が遮断される
     # 最終出力では replace_punctuation() により「:」が「,」に変換される
     assert (
-        normalize_text("赤坂1-2-3の報告書：作品409号の出品が確認された")
-        == "赤坂1の2の3の報告書,作品409号の出品が確認された"
+        normalize_text("赤坂1-2-3の報告書：作品264号の出品が確認された")
+        == "赤坂1の2の3の報告書,作品264号の出品が確認された"
     )
     # 半角コロン「:」で住所文脈が遮断される
     # 最終出力では replace_punctuation() により「:」が「,」に変換される
@@ -2210,3 +1676,705 @@ def test_normalize_text_phone_postal_address_edge_cases():
         normalize_text("六本木1-2-3 ABCビル B1F")
         == "六本木1の2の3,エービーシービル地下1階"
     )
+
+
+def test_normalize_text_address_marker_propagation_prevention():
+    """
+    住所マーカーの伝播防止テスト。
+
+    住所変換後のマーカー以降に助詞を含む文構造テキストがある場合、
+    住所文脈として扱わないことを検証する。
+    __ADDRESS_MARKER_TAIL_PATTERN により、ひらがな（「の」以外）を含む
+    テキストは建物名ではなく文構造と判定される。
+    """
+
+    # マーカー後に助詞「で」を含む文構造テキスト → 住所文脈ではない
+    assert (
+        normalize_text("赤坂1-2-3 パークハイムの受付で309号の書類")
+        == "赤坂1の2の3,パークハイムの受付で309号の書類"
+    )
+    # マーカー後に助詞「で」→ 住所文脈ではない
+    assert (
+        normalize_text("横浜市鶴見区5-3-2で買い物をした後、のぞみ205号に乗った")
+        == "横浜市鶴見区5の3の2で買い物をした後,のぞみ205号に乗った"
+    )
+    # マーカー後に助詞「に」→ マーカー判定では住所文脈としないが、
+    # check 5（建物名キーワード近接）で「ビル」が距離2以内にあるため変換される
+    # これは check 5 の仕様通りの挙動（「ビルにて」の「にて」は2文字）
+    assert (
+        normalize_text("赤坂1-2-3 ABCビルにて309号の議案を審議")
+        == "赤坂1の2の3,エービーシービルにて'サンマルキュー号の議案を審議"
+    )
+    # 「で」は1文字なので check 5 も発動する（建物名キーワードから距離1）
+    # 一方マーカー判定では「受付で」にひらがな「で」があるため住所文脈としない
+    # → check 5 のみで変換される
+    assert (
+        normalize_text("赤坂1-2-3 ABCビルで309号の議案を審議")
+        == "赤坂1の2の3,エービーシービルで'サンマルキュー号の議案を審議"
+    )
+    # check 5 が発動しない距離（「ビルの受付にて」→ 距離5）ではマーカー判定の
+    # 厳格パターンにより住所文脈としない
+    assert (
+        normalize_text("赤坂1-2-3 ABCビルの受付にて309号の議案を審議")
+        == "赤坂1の2の3,エービーシービルの受付にて309号の議案を審議"
+    )
+
+    # 対照: マーカー後が建物名のみ → 住所文脈として変換される
+    assert (
+        normalize_text("赤坂1-2-3 パークハイム 309号")
+        == "赤坂1の2の3,パークハイム'サンマルキュー号"
+    )
+    assert (
+        normalize_text("赤坂1-2-3 パークハイム鹿島田スカイタワー 309号")
+        == "赤坂1の2の3,パークハイム鹿島田スカイタワー'サンマルキュー号"
+    )
+    # マーカー後に「の」のみ含む建物名 → 許容される
+    assert (
+        normalize_text("赤坂1-2-3 パークタワーの丘 309号")
+        == "赤坂1の2の3,パークタワーの丘'サンマルキュー号"
+    )
+
+
+def test_normalize_text_building_brand_names():
+    """
+    大手デベロッパーブランド名による建物名判定テスト。
+
+    __BUILDING_NAME_PATTERN に登録されたブランド名が、
+    建物名キーワード近接チェック（check 5: distance_from_end <= 2）で
+    正しく検出されることを検証する。
+    """
+
+    # 野村不動産: プラウド
+    assert (
+        normalize_text("プラウド武蔵小杉1205号室")
+        == "プラウド武蔵小杉'イチニーゼロゴ号室"
+    )
+    # 東急不動産: ブランズ
+    assert normalize_text("ブランズ横浜1302号室") == "ブランズ横浜'イチサンゼロニ号室"
+    # 東京建物: ブリリア
+    assert normalize_text("ブリリア目黒809号室") == "ブリリア目黒'ハチマルキュー号室"
+    # 大和ハウス: プレミスト
+    assert (
+        normalize_text("プレミスト新宿1002号室") == "プレミスト新宿'イチゼロゼロニ号室"
+    )
+    # 三井不動産: パークホームズ
+    assert (
+        normalize_text("パークホームズ西立川502号室")
+        == "パークホームズ西立川'ゴーマルニ号室"
+    )
+    # 三井不動産: パークコート
+    assert (
+        normalize_text("パークコート青山2001号室")
+        == "パークコート青山'ニーゼロゼロイチ号室"
+    )
+    # 三菱地所: パークハウス
+    assert (
+        normalize_text("パークハウス渋谷502号室") == "パークハウス渋谷'ゴーマルニ号室"
+    )
+    # 住友不動産: シティタワー
+    assert (
+        normalize_text("シティタワー品川1705号室")
+        == "シティタワー品川'イチナナゼロゴ号室"
+    )
+    # 住友不動産: グランドヒルズ（ブランド名直後に部屋番号）
+    assert normalize_text("グランドヒルズ205号") == "グランドヒルズ'ニーマルゴ号"
+    # グランドヒルズ + 地名: 「グランドヒルズ」がまとめてマッチするため、
+    # 後続の地名「白金台」(3文字) で距離が3となり check 5 は発動しない
+    # ただし住所文脈があれば変換される
+    assert (
+        normalize_text("港区白金台3-1-2 グランドヒルズ白金台 205号")
+        == "港区白金台3の1の2,グランドヒルズ白金台'ニーマルゴ号"
+    )
+    # 大京: ライオンズ
+    assert (
+        normalize_text("ライオンズ武蔵小杉1302号室")
+        == "ライオンズ武蔵小杉'イチサンゼロニ号室"
+    )
+    # タカラレーベン: レーベン
+    assert normalize_text("レーベン川崎809号室") == "レーベン川崎'ハチマルキュー号室"
+    # 一般建物種別語の追加分: ガーデン
+    assert normalize_text("サクラガーデン101号室") == "サクラガーデン'イチマルイチ号室"
+    # 一般建物種別語の追加分: メゾン（号室 → 5b 無条件変換パス）
+    assert normalize_text("メゾン青葉台205号室") == "メゾン青葉台'ニーマルゴ号室"
+    # メゾン + 号（号室なし → 5c パス、has_address_context 必要）
+    # 地名が2文字以内なら check 5 が発動する
+    assert normalize_text("メゾン目黒205号") == "メゾン目黒'ニーマルゴ号"
+    # 一般建物種別語の追加分: ヴィラ
+    assert normalize_text("ヴィラ世田谷309号室") == "ヴィラ世田谷'サンマルキュー号室"
+    # ブランド名 + 住所との複合テスト
+    assert (
+        normalize_text("東京都港区六本木1-2-3 ブリリア六本木1205号室")
+        == "東京都港区六本木1の2の3,ブリリア六本木'イチニーゼロゴ号室"
+    )
+    assert (
+        normalize_text("神奈川県川崎市宮前区梶が谷5-30-2 パークホームズ新宮前平 809号")
+        == "神奈川県川崎市宮前区梶が谷5の30の2,パークホームズ新宮前平'ハチマルキュー号"
+    )
+
+
+def _convert_room_digits_for_expected(digits: str) -> str:
+    """号室・部屋番号の期待値生成用ヘルパー。"""
+
+    digit_to_katakana = {
+        "0": "ゼロ",
+        "1": "イチ",
+        "2": "ニー",
+        "3": "サン",
+        "4": "ヨン",
+        "5": "ゴー",
+        "6": "ロク",
+        "7": "ナナ",
+        "8": "ハチ",
+        "9": "キュー",
+    }
+    digit_to_short = {
+        "2": "ニ",
+        "5": "ゴ",
+    }
+
+    # 3桁の部屋番号のみ中間 0 をマルと読む
+    # 4桁以上の部屋番号では中間 0 もゼロと読む
+    ## 例: 3桁 "409" → ヨンマルキュー, 4桁 "1203" → イチニーゼロサン
+    is_use_maru = len(digits) == 3
+
+    converted = ""
+    for index, digit in enumerate(digits):
+        is_first = index == 0
+        is_last = index == len(digits) - 1
+        # 中間 0 はマルにする（3桁かつ前後がともに非 0 の場合のみ）
+        if (
+            is_use_maru is True
+            and is_first is False
+            and is_last is False
+            and digit == "0"
+            and digits[index - 1] != "0"
+            and digits[index + 1] != "0"
+        ):
+            converted += "マル"
+            continue
+        # 末尾の 2 / 5 は短く読む
+        if is_last is True and digit in digit_to_short:
+            converted += digit_to_short[digit]
+            continue
+        converted += digit_to_katakana[digit]
+    return converted
+
+
+def _build_room_context_positive_cases() -> list[tuple[str, str]]:
+    """住所 + 建物名 + 号 / 号室 の大量ケースを生成する。"""
+
+    address_cases = [
+        ("神奈川県川崎市幸区鹿島田1-34-5", "神奈川県川崎市幸区鹿島田1の34の5"),
+        ("東京都港区赤坂1-2-3", "東京都港区赤坂1の2の3"),
+        ("大阪府大阪市北区梅田3-1-3", "大阪府大阪市北区梅田3の1の3"),
+        ("福岡県北九州市小倉南区石田町399-18", "福岡県北九州市小倉南区石田町399の18"),
+        ("宮城県仙台市若林区裏柴田町36-1", "宮城県仙台市若林区裏柴田町36の1"),
+        ("静岡県焼津市岡当目588-15", "静岡県焼津市岡当目588の15"),
+        ("奈良県桜井市鹿路341-18", "奈良県桜井市鹿路341の18"),
+        ("六本木1-2-3", "六本木1の2の3"),
+        ("赤坂9-7-1", "赤坂9の7の1"),
+        ("神奈川県川崎市幸区鹿島田１−３４−５", "神奈川県川崎市幸区鹿島田1の34の5"),
+    ]
+    building_names = [
+        "パークハイム鹿島田第一",
+        "プラウド武蔵小杉",
+        "鹿島田第一",
+        "ネクサス鹿島田",
+        "サクラコート",
+        "フォレストタワー",
+    ]
+    room_numbers = [
+        # 3桁: 中間0→マル
+        "101",  # イチマルイチ
+        "204",  # ニーマルヨン（先頭1モーラ数字2）
+        "309",  # サンマルキュー
+        "405",  # ヨンマルゴ（末尾1モーラ数字5→ゴ）
+        "502",  # ゴーマルニ（先頭1モーラ数字5、末尾1モーラ数字2→ニ）
+        "802",  # ハチマルニ（末尾1モーラ数字2→ニ）
+        # 3桁: 0なし
+        "123",  # イチニーサン
+        "789",  # ナナハチキュー
+        # 3桁: 先頭・末尾0→ゼロ
+        "100",  # イチゼロゼロ（連続0）
+        "410",  # ヨンイチゼロ（末尾0）
+        # 4桁: 中間0→ゼロ（マルではない）
+        "1205",  # イチニーゼロゴ（末尾1モーラ数字5→ゴ）
+        "1409",  # イチヨンゼロキュー
+        "1302",  # イチサンゼロニ（末尾1モーラ数字2→ニ）
+        "1001",  # イチゼロゼロイチ（連続0）
+        "2505",  # ニーゴーゼロゴ（先頭・中間に1モーラ数字）
+    ]
+    suffixes = [
+        "号",
+        "号室",
+    ]
+    spaces = [
+        " ",
+    ]
+
+    cases: list[tuple[str, str]] = []
+    for address_input, normalized_address in address_cases:
+        for space_between_address_and_building in spaces:
+            for building_name in building_names:
+                for space_between_building_and_room in spaces:
+                    for room_number in room_numbers:
+                        room_katakana = _convert_room_digits_for_expected(room_number)
+                        for suffix in suffixes:
+                            text = (
+                                f"{address_input}"
+                                f"{space_between_address_and_building}"
+                                f"{building_name}"
+                                f"{space_between_building_and_room}"
+                                f"{room_number}{suffix}"
+                            )
+                            expected = (
+                                f"{normalized_address},{building_name}"
+                                f"'{room_katakana}{suffix}"
+                            )
+                            cases.append((text, expected))
+    return cases
+
+
+def _build_room_context_negative_cases() -> list[tuple[str, str]]:
+    """住所文脈がない 号 の非変換ケースを大量生成する。"""
+
+    prefixes = [
+        "こだま",
+        "のぞみ",
+        "ひかり",
+        "特急",
+        "急行",
+        "第",
+        "作品",
+        "問題",
+        "章",
+        "話",
+        "案件",
+        "型番",
+        "規格",
+        "便",
+        "列車",
+        "ルール",
+        "プロトコル",
+        "プレイリスト",
+        "任務",
+        "講義",
+        "イベント",
+        "チャンネル",
+        "プラン",
+        "フォーマット",
+        "テンプレート",
+        "シリーズ",
+        "ファイル",
+        "プロジェクト",
+        "テスト",
+        "モデル",
+    ]
+    room_numbers = [
+        "101",
+        "204",
+        "309",
+        "405",
+        "502",
+        "1205",
+        "1409",
+        "1302",
+    ]
+    suffixes = [
+        "号",
+    ]
+
+    cases: list[tuple[str, str]] = []
+    for prefix in prefixes:
+        for room_number in room_numbers:
+            for suffix in suffixes:
+                text = f"{prefix}{room_number}{suffix}を参照してください"
+                expected = text
+                cases.append((text, expected))
+    return cases
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    _build_room_context_positive_cases(),
+)
+def test_normalize_text_room_context_positive_massive(text: str, expected: str):
+    """住所文脈ありの 号 / 号室 の正規化を大量ケースで検証する。"""
+
+    assert normalize_text(text) == expected
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    _build_room_context_negative_cases(),
+)
+def test_normalize_text_room_context_negative_massive(text: str, expected: str):
+    """住所文脈なしの 号 の誤変換を大量ケースで検証する。"""
+
+    assert normalize_text(text) == expected
+
+
+def _build_gou_false_positive_admin_kanji_cases() -> list[tuple[str, str]]:
+    """
+    行政区画漢字（都道府県市区町村）を含むが住所文脈ではない文で、
+    NNN号 が桁読みに誤変換されないことを検証するケースを生成する。
+
+    has_address_context() の __ADDRESS_CONTEXT_PATTERN が単漢字マッチのため、
+    「市場」「区別」「北海道」等の非住所語に含まれる漢字で偽陽性が発生する。
+    """
+
+    # {num} に数字を埋め込み、{num}号 が変換されないことを確認する
+    # 各テンプレートには行政区画漢字を含む非住所語が含まれている
+    templates = [
+        # 「市」: 市場, 市民, 都市, 市販, 闇市, 朝市, 市街地, 市長
+        "市場で{num}号の整理券を受け取った",
+        "市民ホールで公演{num}号が開催された",
+        "都市計画のプロジェクト{num}号を推進する",
+        "市販の製品カタログ{num}号を確認した",
+        "闇市で仕入れた品物の管理タグ{num}号がある",
+        "朝市で整理券{num}号を配布している",
+        "市街地で特別列車{num}号を見かけた",
+        "市長が法案{num}号に署名した",
+        # 「区」: 区別, 区間, 地区, 学区, 区画, 特区
+        "区別がつかないので識別番号{num}号を振った",
+        "区間快速の列車{num}号に乗った",
+        "地区大会で選手番号{num}号が優勝した",
+        "学区の会報誌{num}号が届いた",
+        "区画整理の事業認可{num}号が下りた",
+        "特区に指定された施設の登録番号{num}号です",
+        # 「町」: 下町, 城下町, 門前町, 町内, 町工場
+        "下町の店で整理券{num}号を配布した",
+        "城下町を散策して記念コイン{num}号を購入した",
+        "門前町の伝統祭りでくじ{num}号を引いた",
+        "町内会の回覧板{num}号を回してください",
+        "町工場で部品{num}号を製造している",
+        # 「村」: 村上, 村田, 農村, 漁村, 山村
+        "村上春樹の短編集で作品{num}号が好きだ",
+        "村田製作所の製品カタログ{num}号を確認した",
+        "農村の暮らしを描いた絵画{num}号が入賞した",
+        "漁村で水揚げされた漁獲管理番号{num}号を確認した",
+        "山村留学のパンフレット{num}号を取り寄せた",
+        # 「道」: 北海道, 柔道, 書道, 鉄道, 水道, 歩道, 茶道
+        "北海道の名産品カタログ{num}号を取り寄せた",
+        "柔道の段位証書{num}号を授与された",
+        "書道展に出品された作品{num}号が入賞した",
+        "鉄道ファンの雑誌{num}号を購読している",
+        "水道の検査レポート{num}号を提出した",
+        "歩道の改善要望書{num}号が受理された",
+        "茶道の免状で認定番号{num}号を受けた",
+        # 「府」: 政府, 幕府, 府中, 内閣府
+        "政府が発表した政令{num}号を確認した",
+        "幕府が発布した法令{num}号を調査した",
+        "府中の競馬場でレース{num}号が開催された",
+        "内閣府の告示{num}号を参照してください",
+        # 「県」: 県庁, 県民, 県警, 県道
+        "県庁で申請書{num}号を提出した",
+        "県民アンケート{num}号を集計した",
+        "県警が捜査資料{num}号を公開した",
+        "県道の標識を管理番号{num}号で登録した",
+        # 「都」: 都合, 首都, 都営, 都心, 都度
+        "都合が悪いので予約{num}号をキャンセルした",
+        "首都高速の路線{num}号が渋滞している",
+        "都営バスの系統{num}号に乗車した",
+        "都心で開催されたイベントのブース{num}号に出展した",
+        "都度払いで請求書{num}号を発行した",
+    ]
+
+    numbers = ["309", "205", "1205"]
+
+    cases: list[tuple[str, str]] = []
+    for template in templates:
+        for num in numbers:
+            text = template.format(num=num)
+            # 期待値: NNN号 が桁読みに変換されない（入力と同一）
+            cases.append((text, text))
+    return cases
+
+
+def _build_gou_false_positive_building_keyword_cases() -> list[tuple[str, str]]:
+    """
+    建物名キーワード（タワー, ビル, 館 等）を含むが住所文脈ではない文で、
+    NNN号 が桁読みに誤変換されないことを検証するケースを生成する。
+
+    has_address_context() の __BUILDING_NAME_PATTERN が部分一致のため、
+    「東京タワー」「体育館」「ビルド」等の非建物名語に含まれるキーワードで偽陽性が発生する。
+    """
+
+    templates = [
+        # 「タワー」: 東京タワー, タワーレコード, タワーディフェンス
+        "東京タワーの入場券{num}号を持っている",
+        "タワーレコードの注文番号{num}号が発送された",
+        "タワーディフェンスゲームのステージ{num}号をクリアした",
+        # 「ビル」: ビルド, ビルダー, ビル（人名）
+        "ビルドエラーのチケット{num}号を修正した",
+        "ビルダーパターンのプルリクエスト{num}号をマージした",
+        # 「館」: 体育館, 図書館, 映画館, 美術館, 水族館, 博物館
+        "体育館でロッカー番号{num}号を使った",
+        "図書館の蔵書番号{num}号を借りた",
+        "映画館でシアター{num}号に入場した",
+        "美術館の展示品番号{num}号が修復中だ",
+        "水族館のチケット{num}号で入場した",
+        "博物館の収蔵品{num}号を展示する予定だ",
+        # 「荘」: 荘厳, 荘園
+        "荘厳な雰囲気の演奏会プログラム{num}号が始まった",
+        "荘園の歴史を記した文献{num}号を参照した",
+        # 「コート」: テニスコート, バスケットボールコート, コート（衣類）
+        "テニスコートの利用予約番号{num}号を取った",
+        "コートを着て外出し整理券{num}号を受け取った",
+        # 「棟」: 棟梁
+        "棟梁が手がけた建築の文化財指定{num}号を受けた",
+    ]
+
+    numbers = ["309", "205", "1205"]
+
+    cases: list[tuple[str, str]] = []
+    for template in templates:
+        for num in numbers:
+            text = template.format(num=num)
+            cases.append((text, text))
+    return cases
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    _build_gou_false_positive_admin_kanji_cases(),
+)
+def test_normalize_text_gou_false_positive_admin_kanji(
+    text: str,
+    expected: str,
+):
+    """行政区画漢字を含む非住所文で NNN号 が誤変換されないことを検証する。"""
+
+    assert normalize_text(text) == expected
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    _build_gou_false_positive_building_keyword_cases(),
+)
+def test_normalize_text_gou_false_positive_building_keywords(
+    text: str,
+    expected: str,
+):
+    """建物名キーワードを含む非住所文で NNN号 が誤変換されないことを検証する。"""
+
+    assert normalize_text(text) == expected
+
+
+def test_normalize_text_mixed_scripts():
+    """文字種混在のテスト"""
+    # 漢字・ひらがな・カタカナの混在
+    assert (
+        normalize_text("漢字とひらがなとカタカナの混在文")
+        == "漢字とひらがなとカタカナの混在文"
+    )
+    # 英数字との混在
+    assert normalize_text("123と漢字とABCの混在") == "123と漢字とエービーシーの混在"
+    # 記号との混在
+    assert normalize_text("漢字+カタカナ=混在!?") == "漢字プラスカタカナイコール混在!?"
+    # 特殊文字との混在
+    assert normalize_text("①漢字②ひらがな③カタカナ") == "1漢字2ひらがな3カタカナ"
+    # 単位との混在
+    assert (
+        normalize_text("漢字100kg+カタカナ500m")
+        == "漢字100キログラムプラスカタカナ500メートル"
+    )
+
+
+def test_normalize_text_edge_cases():
+    """エッジケースの正規化のテスト"""
+    # 空文字列
+    assert normalize_text("") == ""
+    # 記号のみ
+    assert normalize_text("...") == "..."
+    assert normalize_text("!!!") == "!!!"
+    assert normalize_text("???") == "???"
+    # 数字のみ
+    assert normalize_text("12345") == "12345"
+
+    # 結合文字の濁点・半濁点
+    assert normalize_text("か゛") == "か"  # 結合文字の濁点は削除
+    assert normalize_text("は゜") == "は"  # 結合文字の半濁点は削除
+
+    # 数字と数字の間のスペースは ' に変換される（数字連結防止）
+    # "5090 32" が "509032" になって「ゴジュウマンキュウセンサンジュウニ」と読まれるのを防ぐ
+    assert normalize_text("RTX 5090 32GB") == "アールティーエックス5090'32ギガバイト"
+    assert (
+        # H100 の H は単独では変換されない
+        normalize_text("H100 96GB") == "H100'96ギガバイト"
+    )
+    assert normalize_text("100 200 300") == "100'200'300"
+    # 英字と数字の間のスペースは連結しても問題ないため変換不要
+    assert normalize_text("RTX 5090") == "アールティーエックス5090"
+
+    # 極端に長い数値
+    assert normalize_text("12345678901234567890") == "12345678901234567890"
+    # 極端に長い英単語
+    assert (
+        normalize_text("supercalifragilisticexpialidocious")
+        == "スーパーカリフラジリー"  # e2k ライブラリによる自動推定結果
+    )
+    # 特殊な文字の組み合わせ
+    assert normalize_text("㊊㊋㊌㊍㊎㊏㊐") == "月火水木金土日"  # 曜日の丸文字
+    assert (
+        normalize_text("㍉㌔㌢㍍㌘㌧㌃㌶㍑㍗")
+        == "ミリキロセンチメートルグラムトンアールヘクタールリットルワット"
+    )
+
+
+def test_normalize_text_complex():
+    """複合的なパターンの正規化のテスト"""
+    # 日付・時刻・単位を含む文
+    assert (
+        normalize_text("2024/01/01(月)の14時30分に1.5kgの荷物を受け取った。")
+        == "2024年1月1日月曜日の十四時三十分に1.5キログラムの荷物を受け取った."
+    )
+    assert (
+        normalize_text("MacBookで1080p/60fpsの動画を2GB保存した。")
+        == "マックブックで1080p/60エフピーエスの動画を2ギガバイト保存した."
+    )
+    assert (
+        normalize_text("¥1,000の商品を2個買うと、¥2,000です（1,000×2=2,000）。")
+        == "1000円の商品を2個買うと,2000円です'1000かける2イコール2000'."
+    )
+    assert (
+        normalize_text(
+            "お問い合わせは、info@example.comまたはhttps://example.com/contactまで！"
+        )
+        == "お問い合わせは,インフォ,アットマーク,イグザンプルドットコムまたはエイチティーティーピーエス,イグザンプルドットコム,スラッシュ,コンタクトまで!"
+    )
+    assert (
+        normalize_text("09:30に家を出発し、2km先のスーパーで500gのお肉を買った。")
+        == "九時三十分に家を出発し,2キロメートル先のスーパーで500グラムのお肉を買った."
+    )
+    assert (
+        normalize_text(
+            "2024/05/01にWindowsのアップデート（2GB+500MB=2.5GB）を実施する。"
+        )
+        == "2024年5月1日にウィンドウズのアップデート'2ギガバイトプラス500メガバイトイコール2.5ギガバイト'を実施する."
+    )
+    assert (
+        normalize_text(
+            "CPU使用率が50%を超え、メモリ消費が2GBに達した時点で、Windows Serverは自動的に再起動します。"
+        )
+        == "シーピーユー使用率が50パーセントを超え,メモリ消費が2ギガバイトに達した時点で,ウィンドウズサーバーは自動的に再起動します."
+    )
+    assert (
+        normalize_text(
+            "新商品のiPhone 15 Pro Max (256GB)が¥158,000(税込)で発売！9/22(金)午前10時から予約受付開始。"
+        )
+        == "新商品のアイフォン15プロマックス'256ギガバイト'が158000円'税込'で発売!9月22日金曜日午前10時から予約受付開始."
+    )
+    assert (
+        normalize_text(
+            "株式会社Deeptest(担当：山田)様、10/1(月)15:00〜17:00にWeb会議(https://meet.example.com/test)を設定しました。"
+        )
+        == "株式会社ディープテスト'担当,山田'様,10月1日月曜日十五時から十七時にウェブ会議'エイチティーティーピーエス,ミートドット,イグザンプルドットコム,スラッシュ,テスト'を設定しました."
+    )
+    assert (
+        normalize_text(
+            "材料(4人分)：牛肉250g、玉ねぎ1個、水300mL、醤油大さじ2(30mL)、砂糖20g。"
+        )
+        == "材料'4人分',牛肉250グラム,玉ねぎ1個,水300ミリリットル,醤油大さじ2'30ミリリットル',砂糖20グラム."
+    )
+    assert (
+        normalize_text(
+            "2つの数 a, b があり、a:b = 2:3 で、a + b = 10 のとき、a = 4, b = 6 となります。"
+        )
+        == "2つの数a,bがあり,a,bイコール二タイ三で,aプラスbイコール10のとき,aイコール4,bイコール6となります."
+    )
+    assert (
+        normalize_text(
+            "JavaScriptでArray.prototype.map()を使用し、配列の要素を2倍にする処理を1/100秒で実行。"
+        )
+        == "ジャバスクリプトでアレイプロトタイプマップ''を使用し,配列の要素を2倍にする処理を百ぶんの一秒で実行."
+    )
+    assert (
+        normalize_text(
+            "今日01/03（月）にですね、16:9の映像を1/128の確率で表示するイベントをやっていて、85/09/30の08月01日(金)にお会いした人と久々に会うんです"
+        )
+        == "今日1月3日月曜日にですね,十六タイ九の映像を百二十八ぶんの一の確率で表示するイベントをやっていて,1985年9月30日の8月1日金曜日にお会いした人と久々に会うんです"
+    )
+    assert (
+        normalize_text(
+            "path-to-model-file.onnx は事前学習済みの onnx モデルファイルです。 onnx_model/phoneme_transition_model.onnxにあります。 path-to-wav-file はサンプリング周波数 16kHz  のモノラル wav ファイルです。 path-to-phoneme-file は音素を空白区切りしたテキストが格納されたファイルのパスです。 NOTE: 開始音素と終了音素は pau である必要があります。"
+        )
+        == "パストゥーモデルファイルオニキスは事前学習済みのオニキスモデルファイルです.オニキスモデル/フォーニムトランジションモデルオニキスにあります.パストゥーワブファイルはサンプリング周波数16キロヘルツのモノラルワブファイルです.パストゥーフォーニムファイルは音素を空白区切りしたテキストが格納されたファイルのパスです.ノート,開始音素と終了音素はパウである必要があります."
+    )
+    assert (
+        normalize_text(
+            "Apple Watch Series 10も安くなっている。Amazonでの 販売価格は、昨年発売された新モデルということもあり、過去最安値となっている。42mmのジェットブラックモデル（Wi-Fi）の場合、5％OFFの\\53,693＋537ポイントで販売している。ヨドバシ.comとビックカメラ.comでもセール対象となっており、ポイント還元分を含んだ実質価格はAmazonと同等だ。"
+        )
+        == "アップルウォッチシリーズテンも安くなっている.アマゾンでの販売価格は,昨年発売された新モデルということもあり,過去最安値となっている.42ミリメートルのジェットブラックモデル'ワイファイ'の場合,5パーセントオフの53693円プラス537ポイントで販売している.ヨドバシ.コムとビックカメラ.コムでもセール対象となっており,ポイント還元分を含んだ実質価格はアマゾンと同等だ."
+    )
+    assert (
+        normalize_text(
+            "音質面では、8W×2基のスピーカーを搭載。立体音響フォーマットはDTS:Xに対応し、バーチャルサウンド技術のDTS:Virtualサウンドを活用した再生も可能だという。Google TVが導入されているため、YouTube／Prime Video／Netflixといった多数のVODサービスが楽しめる他、音声操作のGoogleアシスタントbuilt-in、スマートフォンなどのデバイスからテレビに映像をキャストするChromecast built-inなども採用されている。ユニボディデザインに極上メタリックフレームを採用したプレミアムなデザインも特徴的。付属リモコンは、Bluetooth接続タイプが投入されている。ワイヤレス機能は、Bluetooth ver5.0、Wi-Fi（5GHz/2.4GHz）に対応する。"
+        )
+        == "音質面では,8Wかける2基のスピーカーを搭載.立体音響フォーマットはディーティーエス,Xに対応し,バーチャルサウンド技術のディーティーエス,バーチャルサウンドを活用した再生も可能だという.グーグルティービーが導入されているため,ユーチューブ/プライムビデオ/ネットフリックスといった多数のブイーオーディーサービスが楽しめる他,音声操作のグーグルアシスタントビルトイン,スマートフォンなどのデバイスからテレビに映像をキャストするクロームキャストビルトインなども採用されている.ユニボディデザインに極上メタリックフレームを採用したプレミアムなデザインも特徴的.付属リモコンは,ブルートゥース接続タイプが投入されている.ワイヤレス機能は,ブルートゥースバー5.0,ワイファイ'5ギガヘルツ/2.4ギガヘルツ'に対応する."
+    )
+    assert (
+        normalize_text(
+            "Scopely（スコープリー）は『モノポリーGO』や『マーベル・ストライクフォース』などを配信している、アメリカのモバイルゲーム会社。2023年にサウジアラビアのSavvy Games Groupに49億ドルで買収されている。 一方のナイアンティックは、前述のゲーム事業の売却に合わせて、新会社となる”Niantic Spatial Inc.”（ナイアンティックスペーシャル）を設立。ジオスペーシャルAI事業として、空間コンピューティング、XR、地理情報システム（GIS）、AIを統合した、新たなプラットフォーム”Niantic Spatial Platform”へ注力するという。なお、『ポケモンGO』や『モンスターハンターNow』、『ピクミンブルーム』の事業はスコープリーへ移管されるものの、『Ingress Prime』や『Peridot』などの現実世界を舞台にしたARゲームは引き続き、ナイアンティック側で運営を行う。"
+        )
+        == "スコープリー'スコープリー'はモノポリーゴーやマーベル,ストライクフォースなどを配信している,アメリカのモバイルゲーム会社.2023年にサウジアラビアのサヴィゲームズグループに49億ドルで買収されている.一方のナイアンティックは,前述のゲーム事業の売却に合わせて,新会社となる'ナイアンティックスペイシャルインク.''ナイアンティックスペーシャル'を設立.ジオスペーシャルエーアイ事業として,空間コンピューティング,エックスアール,地理情報システム'ジーアイエス',エーアイを統合した,新たなプラットフォーム'ナイアンティックスペイシャルプラットフォーム'へ注力するという.なお,ポケモンゴーやモンスターハンターナウ,ピクミンブルームの事業はスコープリーへ移管されるものの,イングレスプライムやペリドットなどの現実世界を舞台にしたエーアールゲームは引き続き,ナイアンティック側で運営を行う."
+    )
+    assert (
+        normalize_text(
+            "ROCK5 is a series of Rockchip RK3588(s) based SBC(Single Board Computer) by Radxa. It can run Linux, Android, BSD and other distributions. ROCK5 comes in two models, Model A and Model B. Both models offer 4GB, 8GB, 16GB and 32GB options. For detailed difference between Model A and Model B, please check Specifications. ROCK5 features a Octa core ARM processor(4x Cortex-A76 + 4x Cortex-A55), 64bit 3200Mb/s LPDDR4, up to 8K@60 HDMI, MIPI DSI, MIPI CSI, 3.5mm jack with mic, USB Port, 2.5 GbE LAN, PCIe 3.0, PCIe 2.0, 40-pin color expansion header, RTC. Also, ROCK5 supports USB PD and QC powering."
+        )
+        == "ロックファイブイズアシリーズオブロックチップRK3588's'ベースドエスビーシー'シングルボードコンピューター'バイラダ.イットキャンランリナックス,アンドロイド,ビーエスディーアンドアザーディストリビューションズ.ロックファイブカムズインツーモデルズ,モデルAアンドモデルB.ボスモデルズオファー4ギガバイト,8ギガバイト,16ギガバイトアンド32ギガバイトオプションズ.フォーディテールズディファレンスビトゥイーンモデルAアンドモデルB,プリーズチェックスペシフィケーションズ.ロックファイブフィーチャーズアオクタコアアームプロセッサー'4xコーテックスA76プラス4xコーテックスA55',64ビット3200メガビット毎秒エルピーディーディーアールフォー,アップトゥーはちケー60エイチディーエムアイ,ミピーディーエスアイ,ミピーシーエスアイ,3.5ミリメートルジャックウィズマイク,ユーエスビーポート,2.5ジービーイーラン,ピーシーアイイー3.0,ピーシーアイイー2.0,40ピンカラーエクスパンションヘッダー,アールティーシー.オルソ,ロックファイブサポーツユーエスビーピーディーアンドキューシーパワーリング."
+    )
+
+
+def test_normalize_text_itaiji():
+    """異体字・旧字体→新字体の変換テスト"""
+
+    # 基本的な旧字体→新字体の変換
+    assert normalize_text("學校") == "学校"
+    assert normalize_text("國語") == "国語"
+    assert normalize_text("經濟") == "経済"
+    assert normalize_text("醫學") == "医学"
+    assert normalize_text("圖書館") == "図書館"
+    assert normalize_text("鐵道") == "鉄道"
+    assert normalize_text("歷史") == "歴史"
+    assert normalize_text("實驗") == "実験"
+    assert normalize_text("體育") == "体育"
+    assert normalize_text("變化") == "変化"
+
+    # 旧字体を含む文
+    assert normalize_text("國語の學校で勉強する。") == "国語の学校で勉強する."
+    assert normalize_text("圖書館で經濟學を學ぶ。") == "図書館で経済学を学ぶ."
+    assert normalize_text("醫學部の實驗は嚴しい。") == "医学部の実験は厳しい."
+
+    # 新字体のみの文はそのまま通過する
+    assert normalize_text("学校で勉強する。") == "学校で勉強する."
+    assert normalize_text("図書館で本を読む。") == "図書館で本を読む."
+
+    # 旧字体と新字体が混在する文
+    assert normalize_text("學校と図書館で勉強する。") == "学校と図書館で勉強する."
+
+    # 旧字体と他の正規化処理が組み合わさるケース
+    # 旧字体変換 + 日付正規化
+    assert normalize_text("2024/01/01に學校へ行く。") == "2024年1月1日に学校へ行く."
+    # 旧字体変換 + 英単語カタカナ変換
+    assert normalize_text("經濟のNewsを讀む。") == "経済のニューズを読む."
+    # 旧字体変換 + 単位変換
+    assert normalize_text("學校まで3km歩く。") == "学校まで3キロメートル歩く."
+
+    # 複数の旧字体が連続するケース
+    assert normalize_text("國際經濟學") == "国際経済学"
+    assert normalize_text("勸業銀行") == "勧業銀行"
+    assert normalize_text("總務省") == "総務省"
+    assert normalize_text("辯護士") == "弁護士"
+    assert normalize_text("營業權") == "営業権"
+
+    # 辨・瓣・辯 はいずれも「弁」に変換される
+    assert normalize_text("辨當") == "弁当"
+    assert normalize_text("花瓣") == "花弁"
+    assert normalize_text("辯論") == "弁論"
+
+    # 旧字体が含まれる固有名詞的な用例
+    assert normalize_text("龍が如く") == "竜が如く"
+    assert normalize_text("櫻の花が咲く。") == "桜の花が咲く."
+    assert normalize_text("澤山の寶物") == "沢山の宝物"
