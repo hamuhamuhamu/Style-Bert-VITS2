@@ -52,8 +52,11 @@ __EMAIL_PATTERN = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
 __WORD_CHAR_PATTERN = re.compile(r"[A-Za-z0-9\u3040-\u30FF\u4E00-\u9FFF]")
 # 候補記号と空白のみで構成される3文字以上の塊を粗抽出
 __BLOCK_PATTERN = re.compile(r"(?:(?:[#$%&*+\-=_:/\\|;<>^])|\s){3,}")
+# 数字の範囲パターン: 5〜10, 100~200 のような表記を検出する
+# カタカナ長音記号「ー」は電話番号のハイフン代替として使われることが多いため、
+# 範囲セパレータには含めない（〜, ~, ～ のみ対応）
 __NUMBER_RANGE_PATTERN = re.compile(
-    r"(\d+(?:\.\d+)?(?:\s*[a-zA-Z]+)?)\s*[〜~～ー]\s*(\d+(?:\.\d+)?(?:\s*[a-zA-Z]+)?)"
+    r"(\d+(?:\.\d+)?(?:\s*[a-zA-Z]+)?)\s*[〜~～]\s*(\d+(?:\.\d+)?(?:\s*[a-zA-Z]+)?)"
 )
 __NUMBER_MATH_PATTERN = re.compile(
     r"(\d+)\s*([+＋➕\-−－ー➖×✖⨯÷➗*＊])\s*(\d+)\s*=\s*(\d+)"
@@ -70,6 +73,19 @@ __ZERO_HOUR_PATTERN = re.compile(r"(?<![0-9])(午前|午後)?0時(?![0-9分]|間
 __TIME_PATTERN = re.compile(r"(\d+)時(\d+)分(?:(\d+)秒)?")
 __ASPECT_PATTERN = re.compile(r"(\d+)[:：](\d+)(?:[:：](\d+))?")
 __EXPONENT_PATTERN = re.compile(r"(\d+(?:\.\d+)?)[eE]([-+]?\d+)")
+
+# × 系文字（×, ✖, ⨯, ❌）の文脈依存読み分けパターン
+# 両側が漢字・カタカナ・数字・アルファベットの場合は「かける」と読む
+# （コラボレーション: きのこの山×タケノコの里、寸法: 1920×1080 等）
+# それ以外の場合は「バツ」と読む（記号: ○か×か、単体使用 等）
+# ❌ (U+274C) のバリエーションセレクタ付き（❌️ 等）も対象
+__CROSS_MARK_AS_KAKERU_PATTERN = re.compile(
+    r"(?<=[\u4e00-\u9fff\u3400-\u4dbf\u30a0-\u30ff0-9a-zA-Z])"
+    r"[×✖⨯❌][\ufe0e\ufe0f]?"
+    r"(?=[\u4e00-\u9fff\u3400-\u4dbf\u30a0-\u30ff0-9a-zA-Z])",
+)
+# 上記パターンに該当しなかった残りの × 系文字を「バツ」に変換するパターン
+__CROSS_MARK_AS_BATSU_PATTERN = re.compile(r"[×✖⨯❌][\ufe0e\ufe0f]?")
 
 # 記号などの読み正規化マップ
 # 一度リストアップしたがユースケース上不要と判断した記号はコメントアウトされている
@@ -93,9 +109,9 @@ __SYMBOL_YOMI_MAP = {
     "＋": "プラス",
     "➕": "プラス",
     "➖": "マイナス",  # 絵文字以外のハイフンは伸ばす棒と区別がつかないので記述していない
-    "×": "かける",
-    "✖": "かける",
-    "⨯": "かける",
+    # × (U+00D7), ✖ (U+2716), ⨯ (U+2A2F) は文脈依存で「かける」or「バツ」に読み分けるため
+    # __SYMBOL_YOMI_MAP には含めず、__CROSS_MARK_AS_KAKERU_PATTERN / __CROSS_MARK_AS_BATSU_PATTERN
+    # で別途処理する
     "÷": "わる",
     "➗": "わる",
     # 等号・不等号
@@ -238,6 +254,65 @@ __SYMBOL_YOMI_MAP = {
 __SYMBOL_YOMI_PATTERN = re.compile("|".join(re.escape(p) for p in __SYMBOL_YOMI_MAP))
 
 # =========== __normalize_phone_postal_address_floor() で使う定数・正規表現パターン ===========
+
+# 漢数字（位取り記数法の1桁漢数字）→半角数字の変換マッピング
+# 「一二三」→「123」のような数列表記の変換に使用する
+# 「百二十三」のような命数法の漢数字は対象外（十・百・千・万 等は含めない）
+__KANJI_TO_DIGIT_MAP: dict[str, str] = {
+    "一": "1",
+    "二": "2",
+    "三": "3",
+    "四": "4",
+    "五": "5",
+    "六": "6",
+    "七": "7",
+    "八": "8",
+    "九": "9",
+    "〇": "0",  # U+3007 IDEOGRAPHIC NUMBER ZERO
+}
+# str.translate() 用の漢数字→半角数字変換テーブル
+__KANJI_TO_DIGIT_TABLE = str.maketrans("一二三四五六七八九〇", "1234567890")
+# 漢数字のゼロ（〇 U+3007）の表記揺れ文字
+# 丸系の Unicode 文字が漢数字のゼロの代わりに使われることがある
+# バリエーションセレクタ (U+FE0E text style / U+FE0F emoji style) 付きも対応する
+__ZERO_VARIANT_REPLACEMENTS: tuple[tuple[str, str], ...] = (
+    # ○ (U+25CB WHITE CIRCLE): 漢数字のゼロとして最もよく誤用される
+    ("○\ufe0f", "〇"),
+    ("○\ufe0e", "〇"),
+    ("○", "〇"),
+    # ◯ (U+25EF LARGE CIRCLE): ○ の大きい版、同様に誤用される
+    ("◯\ufe0f", "〇"),
+    ("◯\ufe0e", "〇"),
+    ("◯", "〇"),
+    # ⭕ (U+2B55 HEAVY LARGE CIRCLE): 絵文字の丸
+    ("⭕\ufe0f", "〇"),
+    ("⭕\ufe0e", "〇"),
+    ("⭕", "〇"),
+    # ⚪ (U+26AA MEDIUM WHITE CIRCLE): 絵文字の白丸
+    ("⚪\ufe0f", "〇"),
+    ("⚪\ufe0e", "〇"),
+    ("⚪", "〇"),
+)
+# 数字間のカタカナ長音記号「ー」をハイフンに変換するパターン
+# 漢数字・半角数字の間にある「ー」を検出する（lookahead で次の文字を消費しない）
+# 例: 〇三ー一二三四ー五六七八 → 〇三-一二三四-五六七八
+__PROLONGED_SOUND_AS_HYPHEN_PATTERN = re.compile(
+    r"(?<=[一二三四五六七八九〇0-9])ー(?=[一二三四五六七八九〇0-9])"
+)
+# 漢数字グループがハイフン系文字で区切られたチェーンパターン
+# 各グループは漢数字のみまたは半角数字のみで構成される
+# 少なくとも2つのグループがハイフン系文字で接続されている必要がある
+# これにより「第3四半期」「一二三さん」のような非数値文脈での誤変換を防ぐ
+# ハイフン系文字: - (U+002D), ˗ (U+02D7), ‐ (U+2010), ‒ (U+2012), – (U+2013), − (U+2212)
+__KANJI_HYPHEN_CHAIN_PATTERN = re.compile(
+    r"(?:[一二三四五六七八九〇]+|\d+)"
+    r"(?:[-\u02d7\u2010\u2012\u2013\u2212](?:[一二三四五六七八九〇]+|\d+))+"
+)
+# 10文字以上連続する漢数字のシーケンスを検出するパターン
+# ハイフンなし電話番号（〇九〇一一一一二二二二 等）の変換に使用する
+# 日本語の電話番号は10〜11桁のため、10文字以上を閾値とする
+# 10文字未満の連続漢数字は人名（一二三さん）や固有名詞の可能性があるため変換しない
+__LONG_KANJI_DIGIT_SEQUENCE_PATTERN = re.compile(r"[一二三四五六七八九〇]{10,}")
 
 # 数字1桁→カタカナ読みのマッピング
 # 1モーラの数字（2, 5）は長音付き（ニー, ゴー）がデフォルト
@@ -647,6 +722,59 @@ __PUNCTUATION_CLEANUP_PATTERN = re.compile(
 )
 
 
+def __normalize_kanji_and_separators(text: str) -> str:
+    """
+    漢数字の数列表記・ゼロの表記揺れ・数字間の長音記号を正規化する。
+
+    この関数は normalize_text() の先頭（jaconv.z2h() の直後）で呼び出される。
+    __replace_symbols() 内の指数変換 (num2words) より前に実行することで、
+    num2words が生成した漢数字（零点零零零零零一二三の「一二三」等）を
+    誤って半角数字に変換してしまうのを防ぐ。
+
+    処理順序:
+      1. ゼロの表記揺れ文字を〇 (U+3007) に正規化
+      2. 数字間のカタカナ長音記号「ー」をハイフンに変換
+         （ステップ 3 でハイフン区切りチェーンとして検出するため、先にハイフンに変換する）
+      3. 漢数字の数列表記を半角数字に変換（ハイフン区切りチェーン or 10文字以上連続のみ）
+      4. 数値変換されずに残った〇を「マル」に変換
+         （〇〇電鉄→マルマル電鉄、ぶっ〇せ→ぶっマルせ 等のふせ字・伏せ字に対応）
+
+    Args:
+        text (str): 正規化するテキスト
+
+    Returns:
+        str: 正規化されたテキスト
+    """
+
+    # 1. ゼロの表記揺れ文字を〇（U+3007 IDEOGRAPHIC NUMBER ZERO）に正規化する
+    # ○ (U+25CB), ◯ (U+25EF), ⭕ (U+2B55), ⚪ (U+26AA) 等の丸系 Unicode 文字が
+    # 漢数字のゼロの代わりに使われることがある
+    # バリエーションセレクタ付き（⚪︎, ⭕️ 等）も含めて正規化する
+    for old_char, new_char in __ZERO_VARIANT_REPLACEMENTS:
+        text = text.replace(old_char, new_char)
+
+    # 2. 数字間のカタカナ長音記号「ー」をハイフンに変換する
+    # 全角入力で電話番号・郵便番号を入力した際に「ー」がハイフンの代わりに使われることがある
+    # 例: ０３ー１２３４ー５６７８ → 03ー1234ー5678 (jaconv.z2h() 後) → 03-1234-5678
+    # 例: 〇三ー一二三四ー五六七八 → 〇三-一二三四-五六七八
+    text = __PROLONGED_SOUND_AS_HYPHEN_PATTERN.sub("-", text)
+
+    # 3. 漢数字の数列表記を半角数字に変換する
+    # 電話番号・郵便番号・住所で漢数字が位取り記数法（一二三 = 123）で使われる場合に対応する
+    # 「一般」「三月」のような漢語・複合語中の単独漢数字は変換しない
+    text = __convert_kanji_numeral_sequences(text)
+
+    # 4. 数値変換されずに残った〇 (U+3007) を「マル」に変換する
+    # Step 1 で全ての丸系文字（○, ◯, ⭕, ⚪ + バリエーションセレクタ付き）は〇に正規化済み
+    # Step 3 で電話番号・郵便番号・住所等の数値コンテキスト内の〇は半角 0 に変換済み
+    # ここで残っている〇は数値コンテキスト外のもの（ふせ字・伏せ字、プレースホルダー等）
+    # 〇 (U+3007) は Unicode カテゴリ Nl のため最終的な文字フィルタで除去されてしまうので、
+    # ここでカタカナ「マル」に変換して読みを保持する
+    text = text.replace("\u3007", "マル")
+
+    return text
+
+
 def normalize_text(text: str) -> str:
     """
     日本語のテキストを正規化する。
@@ -684,6 +812,12 @@ def normalize_text(text: str) -> str:
     text = jaconv.z2h(
         text, kana=False, digit=True, ascii=True, ignore="\u3000"
     )  # 全角スペースは変換しない
+
+    # 漢数字の数列表記・ゼロ表記揺れ・数字間のカタカナ長音記号「ー」を正規化する
+    # __replace_symbols() より前に実行する必要がある（さもなければ __replace_symbols() 内の
+    # 指数変換 (num2words) が生成した漢数字（零点零零零零零一二三の「一二三」等）まで
+    # 半角数字に変換されてしまう）
+    text = __normalize_kanji_and_separators(text)
 
     # Unicode 正規化前に記号を変換
     # 正規化前でないと ℃ などが unicodedata.normalize() で分割されてしまう
@@ -874,7 +1008,8 @@ def __replace_symbols(text: str) -> str:
         # 読み間違いを防ぐため、数式の間に挟まれた場合にのみ下記の通り読み上げる
         if symbol in ("-", "−", "－", "ー"):
             return "マイナス"
-        if symbol in ("*", "＊"):
+        # × 系文字は __SYMBOL_YOMI_MAP から除外されているため、数式内では直接「かける」を返す
+        if symbol in ("*", "＊", "×", "✖", "⨯"):
             return "かける"
         return __SYMBOL_YOMI_MAP.get(symbol, symbol)
 
@@ -1084,6 +1219,13 @@ def __replace_symbols(text: str) -> str:
     ## 記号類辞書置換（〒→郵便番号）の前に実行する（〒 を含むパターンを先に処理するため）
     text = __normalize_phone_postal_address_floor(text)
 
+    # × 系文字の文脈依存読み分け
+    # 両側に漢字・カタカナ・数字・アルファベットがある場合 → 「かける」（コラボ・寸法等）
+    # それ以外 → 「バツ」（記号・ふせ字・単体使用等）
+    # __SYMBOL_YOMI_MAP による一律置換の前に実行する（× 系文字は __SYMBOL_YOMI_MAP に含まれない）
+    text = __CROSS_MARK_AS_KAKERU_PATTERN.sub("かける", text)
+    text = __CROSS_MARK_AS_BATSU_PATTERN.sub("バツ", text)
+
     # 記号類を辞書で置換
     text = __SYMBOL_YOMI_PATTERN.sub(lambda x: __SYMBOL_YOMI_MAP[x.group()], text)
 
@@ -1091,6 +1233,62 @@ def __replace_symbols(text: str) -> str:
     ## __convert_numbers_to_words() は「¥100」を「100円」と自動で読み替えるが、円記号としてバックスラッシュ (U+005C) が使われているとうまく動作しないため
     ## ref: https://ja.wikipedia.org/wiki/%E5%86%86%E8%A8%98%E5%8F%B7
     text = re.sub(r"\\(?=\d)", "¥", text)
+
+    return text
+
+
+def __convert_kanji_numeral_sequences(text: str) -> str:
+    """
+    漢数字の数列表記（位取り記数法）を半角数字に変換する。
+
+    電話番号・郵便番号・住所の文脈で漢数字が使われている場合に対応する。
+    「一二三」→「123」のような位取り記数法の漢数字のみ変換し、
+    「百二十三」のような命数法や、「一般」「三月」のような漢語は変換しない。
+
+    文脈を判定するため、以下の2つの条件でのみ変換を行う:
+      - ハイフン系文字で区切られた2つ以上のグループからなるチェーン
+        （電話番号・郵便番号・住所番地のパターン）
+      - 10文字以上連続する漢数字（ハイフンなし電話番号のパターン）
+
+    これにより「第3四半期」→「第34半期」や「一二三さん」→「123さん」のような
+    非数値文脈での誤変換を防ぐ。
+
+    Args:
+        text (str): 変換対象のテキスト
+
+    Returns:
+        str: 漢数字が半角数字に変換されたテキスト
+    """
+
+    def convert_chain_kanji_digits(match: re.Match[str]) -> str:
+        """
+        ハイフンで区切られたチェーン内の漢数字を半角数字に変換するコールバック。
+
+        漢数字を含まないチェーン（全て半角数字のもの）はそのまま返す。
+        """
+
+        chain = match.group()
+        # 漢数字が含まれていない場合（全て半角数字 + ハイフンのチェーン）はそのまま返す
+        if not any(char in __KANJI_TO_DIGIT_MAP for char in chain):
+            return chain
+        return chain.translate(__KANJI_TO_DIGIT_TABLE)
+
+    # Step 1: ハイフンで区切られた漢数字チェーンを変換する
+    # 電話番号（〇三-一二三四-五六七八）、郵便番号（三〇四-〇〇〇二）、
+    # 住所番地（一-二-三）のようにハイフンで区切られたパターンに対応する
+    # 半角数字と漢数字が混在するチェーン（03-一二三四-五六七八）にも対応する
+    # チェーン内のハイフン系文字（U+2010, U+2013, U+2212 等）はそのまま保持し、
+    # 後段の __normalize_phone_postal_address_floor() ステップ 0 で半角に正規化される
+    text = __KANJI_HYPHEN_CHAIN_PATTERN.sub(convert_chain_kanji_digits, text)
+
+    # Step 2: 10文字以上連続する漢数字をハイフンなし電話番号として変換する
+    # 例: 〇九〇一一一一二二二二 → 09011112222
+    # 日本語の電話番号は10〜11桁のため、10文字以上を閾値とする
+    # 10文字未満の連続漢数字は人名（一二三さん）や固有名詞の可能性があるため変換しない
+    text = __LONG_KANJI_DIGIT_SEQUENCE_PATTERN.sub(
+        lambda m: m.group().translate(__KANJI_TO_DIGIT_TABLE),
+        text,
+    )
 
     return text
 
@@ -1105,6 +1303,7 @@ def __normalize_phone_postal_address_floor(text: str) -> str:
     フロア表記（NF, BNF）は「N階」「地下N階」に変換される。
 
     処理順序:
+      0. ハイフン変種の正規化（数字セパレータとして使われる Unicode ハイフンを半角に統一）
       1. 〒 付き郵便番号（〒 記号ごと変換、後続の __SYMBOL_YOMI_MAP での〒変換を防ぐ）
       2. ハイフン区切り電話番号（先頭0 + 合計10〜11桁）
       3. 〒 なし郵便番号（3桁-4桁パターン）
@@ -1468,6 +1667,7 @@ def __normalize_phone_postal_address_floor(text: str) -> str:
     # 電話番号・郵便番号のセパレータとしては使われないため、変換対象に含めない
     ## これらは後段の replace_punctuation() で適切に処理される
     for hyphen_variant in (
+        "\u02d7",  # MODIFIER LETTER MINUS SIGN（稀だが念のため）
         "\u2010",  # HYPHEN
         "\u2012",  # FIGURE DASH（数字間で使用されることがある）
         "\u2013",  # EN DASH（数字間で使用されることがある）
