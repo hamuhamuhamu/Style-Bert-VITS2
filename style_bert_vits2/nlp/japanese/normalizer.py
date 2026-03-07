@@ -523,6 +523,15 @@ __UNIT_MAP = {
     "mA": "ミリアンペア",
     "kA": "キロアンペア",
     "A": "アンペア",
+    "mAh": "ミリアンペアアワー",
+    "kAh": "キロアンペアアワー",
+    "Ah": "アンペアアワー",
+    "mWh": "ミリワットアワー",
+    "kWh": "キロワットアワー",
+    "MWh": "メガワットアワー",
+    "GWh": "ギガワットアワー",
+    "TWh": "テラワットアワー",
+    "Wh": "ワットアワー",
     "t": "トン",
     "d": "日",
     "h": "時間",
@@ -575,9 +584,20 @@ __UNIT_PATTERN = re.compile(
     r"(?P<number>[0-9.]*[0-9](?:[eE][-+]?[0-9]+)?)\s*"
     r"(?P<unit>(?:(k|d|m)?L|(?:k|c|m)m[23]?|m[23]?|m(?![a-zA-Z])|"
     r"(?:k|m)?g|(?:k|K|M|G|T|P|E)(?:i)?B|B|t|d|h|s|ms|μs|ns|"
-    r"(?:k|m)?A|(?:k|K|M|G|T)?[Hh]z|[Hh][Pp]a|(?:k|K|M|G|T|P|E)?(?:bps|bit|b)))"
+    r"(?:k|m)?Ah|(?:m|k|M|G|T)?Wh|(?:k|m)?A|(?:k|K|M|G|T)?[Hh]z|"
+    r"[Hh][Pp]a|(?:k|K|M|G|T|P|E)?(?:bps|bit|b)))"
     r"(?P<suffix>/[hs])?"
     r"(?=($|(?=/([^A-Za-z]|$))|[^/A-Za-z]))"
+)
+# ページ数表記パターン
+# 「40p」「96P」のような略記を「ページ」に変換する
+# 「No.40p」のような通し番号や「3pm」「40pts」などは誤変換しないようにする
+__PAGE_UNIT_PATTERN = re.compile(
+    r"(?<!No\.)(?<!NO\.)(?<!no\.)(?<!ノー)(?<!ノー\.)"
+    r"(?<![A-Za-z0-9/])"
+    r"(?P<number>\d{1,3}(?:,\d{3})*|\d+)\s*"
+    r"(?P<unit>[pP])"
+    r"(?=($|[^/A-Za-z]))"
 )
 # 数字の区切りとしてのカンマを削除するためのパターン
 __NUMBER_WITH_SEPARATOR_PATTERN = re.compile("[0-9]{1,3}(,[0-9]{3})+")
@@ -623,6 +643,38 @@ __CURRENCY_MAP = {
 }
 __CURRENCY_PATTERN = re.compile(
     r"([$¥€£₩₹₽₺฿₱₴₫₪₦₡₿﷼₠₢₣₤₥₧₨₭₮₯₰₲₳₵₶₷₸₻₼₾])([0-9.]*[0-9])|([0-9.]*[0-9])([$¥€£₩₹₽₺฿₱₴₫₪₦₡₿﷼₠₢₣₤₥₧₨₭₮₯₰₲₳₵₶₷₸₻₼₾])"
+)
+
+# 化学式・化学種としてよく現れる英数字トークンの読み
+## 一般の英単語変換に渡すと「CO2 -> コーツー」のような不自然な読みになる場合があるため、
+## 代表的なものだけ先に固定変換する
+__CHEMICAL_FORMULA_YOMI_MAP: dict[str, str] = {
+    "CO": "シーオー",
+    "CO2": "シーオーツー",
+    "CH4": "シーエイチフォー",
+    "H2O": "エイチツーオー",
+    "N2": "エヌツー",
+    "NO2": "エヌオーツー",
+    "NH3": "エヌエイチスリー",
+    "O2": "オーツー",
+    "O3": "オースリー",
+    "SO2": "エスオーツー",
+    "HCl": "エイチシーエル",
+    "NaCl": "エヌエーシーエル",
+}
+__CHEMICAL_FORMULA_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9])"
+    + "("
+    + "|".join(
+        re.escape(formula)
+        for formula in sorted(
+            __CHEMICAL_FORMULA_YOMI_MAP.keys(),
+            key=len,
+            reverse=True,
+        )
+    )
+    + ")"
+    + r"(?![A-Za-z0-9])"
 )
 
 # =========== __convert_english_to_katakana() で使う定数・正規表現パターン ===========
@@ -1628,8 +1680,8 @@ def __normalize_phone_postal_address_floor(text: str) -> str:
             return True
 
         # 住所ブロック（例: 1-2-3, 1の2の3）を文脈中から探索し、
-        # その前方に明示的な住所語彙があり、かつ後方が建物名相当テキストのみの場合に
-        # 住所文脈とみなす。単なる「バージョン1-2-3 beta」のような非住所は除外する。
+        # その前方に明示的な住所語彙があり、かつ後方が建物名相当テキストのみの場合に住所文脈とみなす
+        # 単なる「バージョン1-2-3 beta」のような非住所は除外する
         for address_block_match in __ADDRESS_BLOCK_PATTERN.finditer(nearby_context):
             head_text = nearby_context[: address_block_match.start()]
             tail_text = nearby_context[address_block_match.end() :]
@@ -1721,9 +1773,9 @@ def __normalize_phone_postal_address_floor(text: str) -> str:
 
     # 5a. 市区町村名などを省略した住所（3要素 + 空白 + 号室）を処理する
     def convert_standalone_3part_with_room(match: re.Match[str]) -> str:
-        # 先頭位置の standalone（例: "2-11-3 309号"）は住所省略入力として許容する。
+        # 先頭位置の standalone（例: "2-11-3 309号"）は住所省略入力として許容する
         # それ以外は住所文脈がある場合のみ変換し、
-        # 「試合結果5-3-2 309号」のような非住所文での誤変換を防ぐ。
+        # 「試合結果5-3-2 309号」のような非住所文での誤変換を防ぐ
         if match.start() > 0 and has_address_context(text[: match.start()]) is False:
             return match.group(0)
 
@@ -1819,6 +1871,13 @@ def __convert_numbers_to_words(text: str) -> str:
         str: 変換されたテキスト
     """
 
+    def convert_page_unit(match: re.Match[str]) -> str:
+        page_number = match.group("number").replace(",", "")
+        return f"{page_number}ページ"
+
+    # 「40p」のようなページ数略記を「40ページ」に変換する
+    res = __PAGE_UNIT_PATTERN.sub(convert_page_unit, text)
+
     # 単位の変換（平方メートルなどの特殊な単位も含む）
     def convert_unit(match: re.Match[str]) -> str:
         number = match.group("number")
@@ -1850,7 +1909,7 @@ def __convert_numbers_to_words(text: str) -> str:
             return f"{number}{__UNIT_MAP.get(unit, unit)}"
 
     # 単位の変換
-    res = __UNIT_PATTERN.sub(convert_unit, text)
+    res = __UNIT_PATTERN.sub(convert_unit, res)
 
     # 12,300 のような数字の区切りとしてのカンマを削除
     res = __NUMBER_WITH_SEPARATOR_PATTERN.sub(lambda m: m[0].replace(",", ""), res)
@@ -2012,6 +2071,12 @@ def __convert_english_to_katakana(text: str) -> str:
         # 事前に万が一 word の前後にスペースがあれば除去
         word = word.strip()
         # print(f"word: {word}")
+
+        # 化学式は関数全体の前段で一括置換するが、スラッシュ区切りの再帰処理などでは
+        # ここに素のトークンが再流入するため、単語単位でも同じマップを参照して補完する
+        chemical_formula_yomi = __CHEMICAL_FORMULA_YOMI_MAP.get(word)
+        if chemical_formula_yomi is not None:
+            return chemical_formula_yomi
 
         # 単体の大文字アルファベットは単位や記号として使われるケースが多く、
         # 安易にカタカナ読みすると不自然になりやすいため変換しない
@@ -2332,6 +2397,12 @@ def __convert_english_to_katakana(text: str) -> str:
             if not ("\u30a0" <= c <= "\u30ff"):
                 return False
         return True
+
+    # 既知の化学式は英単語分割より先にまとめて読みへ置換する
+    text = __CHEMICAL_FORMULA_PATTERN.sub(
+        lambda match: __CHEMICAL_FORMULA_YOMI_MAP[match.group(1)],
+        text,
+    )
 
     # NFKC 処理でいくつかハイフンの変種が U+002D とは別のハイフンである U+2010 に変換されるので、それを通常のハイフンに変換する
     text = text.replace("\u2010", "-")
