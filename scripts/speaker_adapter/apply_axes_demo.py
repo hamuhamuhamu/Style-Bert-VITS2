@@ -1,5 +1,5 @@
 """
-外部 speaker embedding と g 軸を使った音声生成のデモ。
+speaker embedding と g 軸を使った音声生成のデモ。
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ def _parse_args() -> argparse.Namespace:
         help="Checkpoint filename (relative to model_assets/{model-name}/)",
     )
     parser.add_argument("--text", type=str, required=True)
-    parser.add_argument("--external_embedding", type=str, required=True)
+    parser.add_argument("--speaker_embedding", type=str, required=True)
     parser.add_argument("--axes_npz", type=str, required=True)
     parser.add_argument("--axes_json", type=str, required=True)
     parser.add_argument("--axis_name", type=str, required=True)
@@ -88,19 +88,19 @@ def main() -> None:
     config_path = model_dir / "config.json"
     style_vec_path = model_dir / "style_vectors.npy"
     output_dir = Path(args.output_dir)
-    external_embedding_path = Path(args.external_embedding)
+    speaker_embedding_path = Path(args.speaker_embedding)
 
     for required_path in (
         model_path,
         config_path,
         style_vec_path,
-        external_embedding_path,
+        speaker_embedding_path,
     ):
         if not required_path.exists():
             raise FileNotFoundError(f"Required file not found: {required_path}")
 
     axis = _load_axis(Path(args.axes_npz), Path(args.axes_json), args.axis_name)
-    external_embedding = np.load(external_embedding_path)
+    speaker_embedding = np.load(speaker_embedding_path)
 
     tts_model = TTSModel(
         model_path=model_path,
@@ -117,7 +117,7 @@ def main() -> None:
             text=args.text,
             language=Languages[args.language],
             speaker_id=args.speaker_id,
-            external_speaker_embedding=external_embedding,
+            speaker_embedding=speaker_embedding,
             g_adjust=g_adjust,
         )
         output_path = output_dir / f"axis_{args.axis_name}_alpha_{alpha:.2f}.wav"

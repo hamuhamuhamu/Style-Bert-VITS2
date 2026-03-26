@@ -77,10 +77,13 @@ def main() -> None:
     logger.info("Loading anime speaker embedding model.")
     model = AnimeSpeakerEmbedding(device=args.device, variant="char")
 
-    for audio_path in audio_paths:
+    for i, audio_path in enumerate(audio_paths):
         output_path = Path(f"{audio_path}.spk.npy")
         if args.skip_existing and output_path.exists():
             continue
+
+        if (i + 1) % 100 == 0 or i == 0:
+            logger.info(f"Processing {i + 1}/{len(audio_paths)}: {audio_path}")
 
         embedding = model.get_embedding(audio_path)
         embedding = np.asarray(embedding, dtype=np.float32).reshape(-1)

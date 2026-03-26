@@ -431,31 +431,59 @@ class MLP(nn.Module):
         return x
 
 
-class ExternalSpeakerAdapter(nn.Module):
+class SpeakerControlEncoder(nn.Module):
     """
-    外部 speaker embedding から g を生成する Adapter（残差接続付き 3 層 MLP）。
-
-    入力次元と出力次元が異なる（例: 192 → 512）変換において、射影した入力を
-    ベースラインとして保持し、メインパスは「差分」のみを学習する設計。
-    これにより入力の話者特性を大きく壊さずに、必要な変換だけを学習できる。
+    anime-speaker-embedding から、話者制御用の低次元表現（制御部分空間）を抽出する。
     """
 
-    def __init__(self, in_dim: int, out_dim: int, hidden_dim: int) -> None:
+    def __init__(self, in_dim: int, out_dim: int) -> None:
         super().__init__()
-        self.fc1 = nn.Linear(in_dim, hidden_dim)
-        self.norm1 = nn.LayerNorm(hidden_dim)
-        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
-        self.norm2 = nn.LayerNorm(hidden_dim)
-        self.fc3 = nn.Linear(hidden_dim, out_dim)
-        # 残差接続: 入力を出力次元に射影してベースラインとする
-        self.residual_proj = nn.Linear(in_dim, out_dim)
+        self.net = nn.Sequential(
+            nn.Linear(in_dim, 256),
+            nn.SiLU(),
+            nn.Linear(256, out_dim),
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        residual = self.residual_proj(x)
-        h = F.silu(self.norm1(self.fc1(x)))
-        h = F.silu(self.norm2(self.fc2(h)))
-        h = self.fc3(h)
-        return h + residual
+        return self.net(x)
+
+
+class SpeakerAdapter(nn.Module):
+    """
+    制御部分空間から g 空間への差分を、ゲート付き残差として生成する。
+    """
+
+    def __init__(self, in_dim: int, out_dim: int) -> None:
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(in_dim, 256),
+            nn.SiLU(),
+            nn.Linear(256, out_dim),
+        )
+        self.gate_logit = nn.Parameter(torch.tensor(-2.0))
+
+    def forward(self, ctrl: torch.Tensor) -> torch.Tensor:
+        delta = self.net(ctrl)
+        gate = torch.sigmoid(self.gate_logit)
+        return gate * delta
+
+    def forward_with_intermediates(
+        self, ctrl: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        中間値を返す forward 。学習中の監視・診断用。
+
+        Args:
+            ctrl (torch.Tensor): control subspace のベクトル
+
+        Returns:
+            tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+                gated_delta, delta (gate 前), gate (scalar)
+        """
+
+        delta = self.net(ctrl)
+        gate = torch.sigmoid(self.gate_logit)
+        return gate * delta, delta, gate
 
 
 class TextEncoder(nn.Module):
@@ -1032,14 +1060,12 @@ class SynthesizerTrn(nn.Module):
         self.use_spk_conditioned_encoder = kwargs.get(
             "use_spk_conditioned_encoder", True
         )
-        self.use_external_speaker_adapter = kwargs.get(
-            "use_external_speaker_adapter", False
+        self.use_speaker_adapter = kwargs.get("use_speaker_adapter", False)
+        self.speaker_adapter_input_dim = kwargs.get(
+            "speaker_adapter_input_dim", gin_channels
         )
-        self.external_speaker_embedding_dim = kwargs.get(
-            "external_speaker_embedding_dim", gin_channels
-        )
-        self.external_speaker_adapter_hidden_dim = kwargs.get(
-            "external_speaker_adapter_hidden_dim", gin_channels
+        self.speaker_adapter_bottleneck_dim = kwargs.get(
+            "speaker_adapter_bottleneck_dim", 48
         )
         self.use_sdp = use_sdp
         self.use_noise_scaled_mas = kwargs.get("use_noise_scaled_mas", False)
@@ -1112,28 +1138,51 @@ class SynthesizerTrn(nn.Module):
             self.emb_g = nn.Embedding(n_speakers, gin_channels)
         else:
             self.ref_enc = ReferenceEncoder(spec_channels, gin_channels)
-        if self.use_external_speaker_adapter is True:
-            self.ext_spk_adapter = ExternalSpeakerAdapter(
-                self.external_speaker_embedding_dim,
-                gin_channels,
-                self.external_speaker_adapter_hidden_dim,
+        if self.use_speaker_adapter is True:
+            self.speaker_control_encoder = SpeakerControlEncoder(
+                self.speaker_adapter_input_dim,
+                self.speaker_adapter_bottleneck_dim,
             )
+            self.speaker_adapter = SpeakerAdapter(
+                self.speaker_adapter_bottleneck_dim,
+                gin_channels,
+            )
+            self.register_buffer("g_neutral", torch.zeros(1, gin_channels))
         else:
-            self.ext_spk_adapter = None
+            self.speaker_control_encoder = None
+            self.speaker_adapter = None
+            # Adapter 無効時でも g_neutral を登録し、チェックポイントの state_dict 互換性を維持する
+            self.register_buffer("g_neutral", torch.zeros(1, gin_channels))
+
+    def set_g_neutral(self, neutral_g: torch.Tensor) -> None:
+        """
+        g_neutral を設定する。このメソッドは学習開始前に一度だけ呼び出す。
+
+        Args:
+            neutral_g (torch.Tensor): 基準となる g ベクトル
+        """
+
+        if neutral_g.dim() == 1:
+            neutral_g = neutral_g.unsqueeze(0)
+        # register_buffer 由来のテンソル更新（属性経由だと型チェッカーに誤解釈される場合がある）
+        self.get_buffer("g_neutral").copy_(neutral_g)
 
     def _resolve_g(
         self,
         sid: torch.Tensor,
         y: torch.Tensor | None,
-        external_spk_emb: torch.Tensor | None,
+        speaker_embedding: torch.Tensor | None,
         g_adjust: torch.Tensor | None,
     ) -> torch.Tensor:
-        if external_spk_emb is not None:
-            if self.ext_spk_adapter is None:
-                raise ValueError("External speaker adapter is disabled")
-            if external_spk_emb.dim() == 1:
-                external_spk_emb = external_spk_emb.unsqueeze(0)
-            g = self.ext_spk_adapter(external_spk_emb)
+        if speaker_embedding is not None:
+            if self.speaker_control_encoder is None or self.speaker_adapter is None:
+                raise ValueError("Speaker control encoder and adapter are required")
+            if speaker_embedding.dim() == 1:
+                speaker_embedding = speaker_embedding.unsqueeze(0)
+            # g_neutral にゲート付き SpeakerAdapter の出力を加算して g を求める
+            ctrl = self.speaker_control_encoder(speaker_embedding)
+            gated_delta = self.speaker_adapter(ctrl)
+            g = self.g_neutral + gated_delta
             g = g.unsqueeze(-1)
         else:
             if self.n_speakers > 0:
@@ -1163,7 +1212,7 @@ class SynthesizerTrn(nn.Module):
         language: torch.Tensor,
         bert: torch.Tensor,
         style_vec: torch.Tensor,
-        external_spk_emb: torch.Tensor | None = None,
+        speaker_embedding: torch.Tensor | None = None,
         g_adjust: torch.Tensor | None = None,
     ) -> tuple[
         torch.Tensor,
@@ -1176,7 +1225,7 @@ class SynthesizerTrn(nn.Module):
         tuple[torch.Tensor, ...],
         tuple[torch.Tensor, ...],
     ]:
-        g = self._resolve_g(sid, y, external_spk_emb, g_adjust)
+        g = self._resolve_g(sid, y, speaker_embedding, g_adjust)
         x, m_p, logs_p, x_mask = self.enc_p(
             x, x_lengths, tone, language, bert, style_vec, g=g
         )
@@ -1266,7 +1315,7 @@ class SynthesizerTrn(nn.Module):
         use_fp16: bool = False,
         durations_frames_override: torch.Tensor | None = None,
         durations_frames_override_mask: torch.Tensor | None = None,
-        external_spk_emb: torch.Tensor | None = None,
+        speaker_embedding: torch.Tensor | None = None,
         g_adjust: torch.Tensor | None = None,
     ) -> tuple[
         torch.Tensor,
@@ -1286,7 +1335,7 @@ class SynthesizerTrn(nn.Module):
         """
         # x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths, tone, language, bert)
         # g = self.gst(y)
-        g = self._resolve_g(sid, y, external_spk_emb, g_adjust)
+        g = self._resolve_g(sid, y, speaker_embedding, g_adjust)
 
         # BERT モデルが FP16 でロードされている場合は特徴量も FP16 になるので、明示的に FP32 に変換することでエラーを防ぐ
         if use_fp16 is True:
@@ -1406,7 +1455,7 @@ class SynthesizerTrn(nn.Module):
         use_fp16: bool = False,
         durations_frames_override: torch.Tensor | None = None,
         durations_frames_override_mask: torch.Tensor | None = None,
-        external_spk_emb: torch.Tensor | None = None,
+        speaker_embedding: torch.Tensor | None = None,
         g_adjust: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, tuple[torch.Tensor, ...]]:
         # Generator 実行前の共通処理
@@ -1426,7 +1475,7 @@ class SynthesizerTrn(nn.Module):
             use_fp16,
             durations_frames_override,
             durations_frames_override_mask,
-            external_spk_emb,
+            speaker_embedding,
             g_adjust,
         )
 

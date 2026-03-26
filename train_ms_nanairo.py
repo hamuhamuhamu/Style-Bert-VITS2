@@ -270,14 +270,14 @@ def run():
     - runtime_config.dataset_path: データセットパス (Data/{model}/)
     """
 
-    if hps.train.train_external_speaker_adapter_only is True:
-        if hps.data.use_external_speaker_embedding is not True:
+    if hps.train.train_speaker_adapter_only is True:
+        if hps.data.use_speaker_embedding is not True:
             raise ValueError(
-                "use_external_speaker_embedding must be true for adapter-only training."
+                "use_speaker_embedding must be true for adapter-only training."
             )
-        if hps.model.use_external_speaker_adapter is not True:
+        if hps.model.use_speaker_adapter is not True:
             raise ValueError(
-                "use_external_speaker_adapter must be true for adapter-only training."
+                "use_speaker_adapter must be true for adapter-only training."
             )
 
     if args.repo_id is not None:
@@ -337,7 +337,7 @@ def run():
     )
     collate_fn = TextAudioSpeakerCollate(
         use_jp_extra=True,
-        use_external_speaker_embedding=hps.data.use_external_speaker_embedding,
+        use_speaker_embedding=hps.data.use_speaker_embedding,
     )
     if not args.not_use_custom_batch_sampler:
         train_sampler = DistributedBucketSampler(
@@ -470,9 +470,9 @@ def run():
         use_spectral_norm=hps.model.use_spectral_norm,
         gin_channels=hps.model.gin_channels,
         slm=hps.model.slm,
-        use_external_speaker_adapter=hps.model.use_external_speaker_adapter,
-        external_speaker_embedding_dim=hps.model.external_speaker_embedding_dim,
-        external_speaker_adapter_hidden_dim=hps.model.external_speaker_adapter_hidden_dim,
+        use_speaker_adapter=hps.model.use_speaker_adapter,
+        speaker_adapter_input_dim=hps.model.speaker_adapter_input_dim,
+        speaker_adapter_bottleneck_dim=hps.model.speaker_adapter_bottleneck_dim,
     ).cuda(local_rank)
 
     if getattr(hps.train, "freeze_JP_bert", False):
@@ -490,15 +490,19 @@ def run():
         for param in net_g.dec.parameters():
             param.requires_grad = False
 
-    if hps.train.train_external_speaker_adapter_only is True:
-        logger.info("Training external speaker adapter only.")
+    if hps.train.train_speaker_adapter_only is True:
+        logger.info("Training speaker adapter only.")
         for param in net_g.parameters():
             param.requires_grad = False
-        if getattr(net_g, "ext_spk_adapter", None) is None:
-            raise ValueError("External speaker adapter is not initialized.")
-        assert net_g.ext_spk_adapter is not None
-        for param in net_g.ext_spk_adapter.parameters():
-            param.requires_grad = True
+        if (
+            hasattr(net_g, "speaker_control_encoder")
+            and net_g.speaker_control_encoder is not None
+        ):
+            for param in net_g.speaker_control_encoder.parameters():
+                param.requires_grad = True
+        if hasattr(net_g, "speaker_adapter") and net_g.speaker_adapter is not None:
+            for param in net_g.speaker_adapter.parameters():
+                param.requires_grad = True
 
     net_d = MultiPeriodDiscriminator(hps.model.use_spectral_norm).cuda(local_rank)
     optim_g = torch.optim.AdamW(
@@ -554,7 +558,8 @@ def run():
             #  bucket_cap_mb=512
         )
 
-    if is_resuming(model_dir):
+    is_resuming_training = is_resuming(model_dir)
+    if is_resuming_training:
         if net_dur_disc is not None:
             # チェックポイントが見つからない場合のデフォルト学習率
             dur_resume_lr = hps.train.learning_rate
@@ -664,6 +669,18 @@ def run():
         finally:
             epoch_str = 1
             global_step = 0
+
+    # 話者アダプタ経路の基準 g は、新規学習開始時のみ emb_g の平均から初期化する
+    # 学習再開時は checkpoint に保存された g_neutral を保持し、学習状態の連続性を壊さない
+    if is_resuming_training is False and (
+        hasattr(net_g.module, "set_g_neutral")
+        and hasattr(net_g.module, "emb_g")
+        and getattr(net_g.module, "use_speaker_adapter", False) is True
+    ):
+        with torch.no_grad():
+            # ゲート付き delta 経路用に、ロード済み emb_g の平均から g_neutral を初期化する
+            g_neutral = net_g.module.emb_g.weight.detach().mean(dim=0, keepdim=True)
+            net_g.module.set_g_neutral(g_neutral)
 
     def lr_lambda(epoch: int) -> float:
         """
@@ -951,18 +968,23 @@ def train_and_evaluate(
     if net_wd is not None:
         net_wd.train()
 
-    use_external_speaker_embedding = getattr(
-        hps.data, "use_external_speaker_embedding", False
-    )
+    use_speaker_embedding = getattr(hps.data, "use_speaker_embedding", False)
     disable_discriminators = (
-        hps.train.train_external_speaker_adapter_only
+        hps.train.train_speaker_adapter_only
         and hps.train.disable_discriminators_for_adapter
     )
-    if hps.train.train_external_speaker_adapter_only is True:
+    if hps.train.train_speaker_adapter_only is True:
         net_g.eval()
-        if getattr(net_g.module, "ext_spk_adapter", None) is None:
-            raise ValueError("External speaker adapter is not initialized.")
-        net_g.module.ext_spk_adapter.train()
+        if (
+            hasattr(net_g.module, "speaker_control_encoder")
+            and net_g.module.speaker_control_encoder is not None
+        ):
+            net_g.module.speaker_control_encoder.train()
+        if (
+            hasattr(net_g.module, "speaker_adapter")
+            and net_g.module.speaker_adapter is not None
+        ):
+            net_g.module.speaker_adapter.train()
 
     if disable_discriminators:
         net_d.eval()
@@ -975,7 +997,7 @@ def train_and_evaluate(
     is_accumulating = gradient_accumulation_steps > 1
 
     for batch_idx, batch in enumerate(train_loader):
-        if use_external_speaker_embedding:
+        if use_speaker_embedding:
             (
                 x,
                 x_lengths,
@@ -988,7 +1010,7 @@ def train_and_evaluate(
                 language,
                 bert,
                 style_vec,
-                external_speaker_embedding,
+                speaker_embedding,
             ) = batch
         else:
             (
@@ -1004,7 +1026,7 @@ def train_and_evaluate(
                 bert,
                 style_vec,
             ) = batch
-            external_speaker_embedding = None
+            speaker_embedding = None
         if net_g.module.use_noise_scaled_mas:
             current_mas_noise_scale = (
                 net_g.module.mas_noise_scale_initial
@@ -1028,10 +1050,8 @@ def train_and_evaluate(
         language = language.cuda(local_rank, non_blocking=True)
         bert = bert.cuda(local_rank, non_blocking=True)
         style_vec = style_vec.cuda(local_rank, non_blocking=True)
-        if external_speaker_embedding is not None:
-            external_speaker_embedding = external_speaker_embedding.cuda(
-                local_rank, non_blocking=True
-            )
+        if speaker_embedding is not None:
+            speaker_embedding = speaker_embedding.cuda(local_rank, non_blocking=True)
 
         with autocast(
             device_type="cuda",
@@ -1058,7 +1078,7 @@ def train_and_evaluate(
                 language,
                 bert,
                 style_vec,
-                external_speaker_embedding,
+                speaker_embedding,
             )
             mel = spec_to_mel_torch(
                 spec,
@@ -1099,6 +1119,8 @@ def train_and_evaluate(
         loss_lm_gen: torch.Tensor | None = None
         loss_dur_gen: torch.Tensor | None = None
         losses_dur_gen: list[torch.Tensor] | None = None
+        loss_teacher = torch.tensor(0.0, device=y.device)
+        loss_delta_l2 = torch.tensor(0.0, device=y.device)
 
         # Discriminator
         if disable_discriminators:
@@ -1303,6 +1325,24 @@ def train_and_evaluate(
                     assert loss_lm_gen is not None
                     loss_gen_all += loss_lm + loss_lm_gen
 
+                # L_teacher は speaker adapter のみ学習モードかつ speaker_embedding がある場合のみ損失へ加算する
+                if (
+                    hps.train.train_speaker_adapter_only is True
+                    and speaker_embedding is not None
+                ):
+                    g_target = net_g.module.emb_g(speakers).detach()
+                    g_pred = g.squeeze(-1)
+                    loss_teacher = F.mse_loss(g_pred, g_target)
+                    loss_gen_all += hps.train.c_teacher * loss_teacher
+
+                    # ゲート適用前の素の delta の二乗平均で、更新幅が膨らみすぎないよう正則化する
+                    assert net_g.module.speaker_control_encoder is not None
+                    assert net_g.module.speaker_adapter is not None
+                    ctrl = net_g.module.speaker_control_encoder(speaker_embedding)
+                    delta = net_g.module.speaker_adapter.net(ctrl)
+                    loss_delta_l2 = delta.pow(2).mean()
+                    loss_gen_all += hps.train.c_delta_l2 * loss_delta_l2
+
         if is_first_accumulation_step:
             optim_g.zero_grad()
 
@@ -1366,6 +1406,8 @@ def train_and_evaluate(
                         "loss/g/mel": loss_mel,
                         "loss/g/dur": loss_dur,
                         "loss/g/kl": loss_kl,
+                        "loss/teacher": loss_teacher,
+                        "loss/delta_l2": loss_delta_l2,
                     }
                 )
                 scalar_dict.update({f"loss/g/{i}": v for i, v in enumerate(losses_gen)})
@@ -1425,22 +1467,33 @@ def train_and_evaluate(
                     scalar_dict["g/norm_mean"] = g_norms.mean()
                     scalar_dict["g/norm_std"] = g_norms.std()
 
-                    # Adapter 経由の場合: residual 接続の比率を記録
-                    # Adapter 出力と residual のバランスが崩れていないか監視する
+                    # speaker embedding 使用時、ゲート付き delta 経路の統計を TensorBoard 用スカラーに記録する
                     if (
-                        use_external_speaker_embedding
-                        and external_speaker_embedding is not None
-                        and hasattr(net_g.module, "ext_spk_adapter")
-                        and net_g.module.ext_spk_adapter is not None
+                        use_speaker_embedding
+                        and speaker_embedding is not None
+                        and hasattr(net_g.module, "speaker_control_encoder")
+                        and net_g.module.speaker_control_encoder is not None
+                        and hasattr(net_g.module, "speaker_adapter")
+                        and net_g.module.speaker_adapter is not None
                     ):
                         with torch.no_grad():
-                            adapter = net_g.module.ext_spk_adapter
-                            residual = adapter.residual_proj(external_speaker_embedding)
-                            adapter_out = g.detach().squeeze(-1) - residual
-                            residual_ratio = residual.norm(dim=-1).mean() / (
-                                adapter_out.norm(dim=-1).mean() + 1e-8
+                            if speaker_embedding.dim() == 1:
+                                speaker_embedding = speaker_embedding.unsqueeze(0)
+                            ctrl = net_g.module.speaker_control_encoder(
+                                speaker_embedding
                             )
-                            scalar_dict["g/adapter_residual_ratio"] = residual_ratio
+                            gated_delta, delta, gate_val = (
+                                net_g.module.speaker_adapter.forward_with_intermediates(
+                                    ctrl
+                                )
+                            )
+                            scalar_dict["g/adapter_delta_norm_mean"] = delta.norm(
+                                dim=-1
+                            ).mean()
+                            scalar_dict["g/adapter_gated_delta_norm_mean"] = (
+                                gated_delta.norm(dim=-1).mean()
+                            )
+                            scalar_dict["g/adapter_gate"] = gate_val
 
                 # 以降のログは計算が重い気がするし誰も見てない気がするのでコメントアウト
                 # image_dict = {
@@ -1583,9 +1636,7 @@ def evaluate(
     audio_dict = {}
     print()
     logger.info("Evaluating ...")
-    use_external_speaker_embedding = getattr(
-        hps.data, "use_external_speaker_embedding", False
-    )
+    use_speaker_embedding = getattr(hps.data, "use_speaker_embedding", False)
     with torch.no_grad():
         for batch_idx, batch in enumerate(eval_loader):
             # 初回の evaluate() 時に最初のバッチを固定サンプルとしてキャッシュ
@@ -1595,7 +1646,7 @@ def evaluate(
                     t.clone() if isinstance(t, torch.Tensor) else t for t in batch
                 )
 
-            if use_external_speaker_embedding:
+            if use_speaker_embedding:
                 (
                     x,
                     x_lengths,
@@ -1608,7 +1659,7 @@ def evaluate(
                     language,
                     bert,
                     style_vec,
-                    external_speaker_embedding,
+                    speaker_embedding,
                 ) = batch
             else:
                 (
@@ -1624,7 +1675,7 @@ def evaluate(
                     bert,
                     style_vec,
                 ) = batch
-                external_speaker_embedding = None
+                speaker_embedding = None
             x, x_lengths = x.cuda(), x_lengths.cuda()
             spec, spec_lengths = spec.cuda(), spec_lengths.cuda()
             y, y_lengths = y.cuda(), y_lengths.cuda()
@@ -1633,8 +1684,8 @@ def evaluate(
             tone = tone.cuda()
             language = language.cuda()
             style_vec = style_vec.cuda()
-            if external_speaker_embedding is not None:
-                external_speaker_embedding = external_speaker_embedding.cuda()
+            if speaker_embedding is not None:
+                speaker_embedding = speaker_embedding.cuda()
             for use_sdp in [True, False]:
                 y_hat, attn, mask, *_ = generator.module.infer(
                     x,
@@ -1647,7 +1698,7 @@ def evaluate(
                     y=spec,
                     max_len=1000,
                     sdp_ratio=0.0 if not use_sdp else 1.0,
-                    external_spk_emb=external_speaker_embedding,
+                    speaker_embedding=speaker_embedding,
                 )
                 y_hat_lengths = mask.sum([1, 2]).long() * hps.data.hop_length
                 # 以降のログは計算が重い気がするし誰も見てない気がするのでコメントアウト
@@ -1695,7 +1746,7 @@ def evaluate(
         # 固定サンプルによる定期合成 (学習進行に伴う品質変化の追跡用)
         # 常に同一入力から合成することで、ステップ間の品質推移を TensorBoard で聴き比べ可能にする
         if _fixed_eval_batch is not None:
-            if use_external_speaker_embedding:
+            if use_speaker_embedding:
                 (
                     fixed_x,
                     fixed_x_lengths,
@@ -1708,7 +1759,7 @@ def evaluate(
                     fixed_language,
                     fixed_bert,
                     fixed_style_vec,
-                    fixed_ext_spk_emb,
+                    fixed_speaker_embedding,
                 ) = _fixed_eval_batch
             else:
                 (
@@ -1724,7 +1775,7 @@ def evaluate(
                     fixed_bert,
                     fixed_style_vec,
                 ) = _fixed_eval_batch
-                fixed_ext_spk_emb = None
+                fixed_speaker_embedding = None
             fixed_x = fixed_x.cuda()
             fixed_x_lengths = fixed_x_lengths.cuda()
             fixed_spec = fixed_spec.cuda()
@@ -1736,8 +1787,8 @@ def evaluate(
             fixed_tone = fixed_tone.cuda()
             fixed_language = fixed_language.cuda()
             fixed_style_vec = fixed_style_vec.cuda()
-            if fixed_ext_spk_emb is not None:
-                fixed_ext_spk_emb = fixed_ext_spk_emb.cuda()
+            if fixed_speaker_embedding is not None:
+                fixed_speaker_embedding = fixed_speaker_embedding.cuda()
             for use_sdp in [True, False]:
                 y_hat, attn, mask, *_ = generator.module.infer(
                     fixed_x,
@@ -1750,7 +1801,7 @@ def evaluate(
                     y=fixed_spec,
                     max_len=1000,
                     sdp_ratio=0.0 if not use_sdp else 1.0,
-                    external_spk_emb=fixed_ext_spk_emb,
+                    speaker_embedding=fixed_speaker_embedding,
                 )
                 y_hat_lengths = mask.sum([1, 2]).long() * hps.data.hop_length
                 audio_dict[f"fixed/audio_{use_sdp}"] = y_hat[0, :, : y_hat_lengths[0]]

@@ -27,6 +27,8 @@ class HyperParametersTrain(BaseModel):
     c_mel: int = 45
     c_kl: float = 1.0
     c_commit: int = 100
+    c_teacher: float = 0.1
+    c_delta_l2: float = 0.01
     skip_optimizer: bool = False
     freeze_ZH_bert: bool = False
     freeze_JP_bert: bool = False
@@ -34,7 +36,7 @@ class HyperParametersTrain(BaseModel):
     freeze_emo: bool = False
     freeze_style: bool = False
     freeze_decoder: bool = False
-    train_external_speaker_adapter_only: bool = False
+    train_speaker_adapter_only: bool = False
     disable_discriminators_for_adapter: bool = True
 
 
@@ -61,7 +63,7 @@ class HyperParametersData(BaseModel):
     style2id: dict[str, int] = {
         "Neutral": 0,
     }
-    use_external_speaker_embedding: bool = False
+    use_speaker_embedding: bool = False
 
 
 class HyperParametersModelSLM(BaseModel):
@@ -98,9 +100,9 @@ class HyperParametersModel(BaseModel):
     n_layers_q: int = 3
     use_spectral_norm: bool = False
     gin_channels: int = 512
-    use_external_speaker_adapter: bool = False
-    external_speaker_embedding_dim: int = 192
-    external_speaker_adapter_hidden_dim: int = 512
+    use_speaker_adapter: bool = False
+    speaker_adapter_input_dim: int = 192
+    speaker_adapter_bottleneck_dim: int = 48
     slm: HyperParametersModelSLM = HyperParametersModelSLM()
 
 

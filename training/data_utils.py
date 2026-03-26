@@ -74,9 +74,7 @@ class TextAudioSpeakerLoader(Dataset[tuple[Any, ...]]):
             self.n_mel_channels = getattr(hparams, "n_mel_channels", 80)
 
         self.cleaned_text = getattr(hparams, "cleaned_text", False)
-        self.use_external_speaker_embedding = getattr(
-            hparams, "use_external_speaker_embedding", False
-        )
+        self.use_speaker_embedding = getattr(hparams, "use_speaker_embedding", False)
         self.speaker_to_audio_paths: dict[str, list[str]] = {}
 
         self.add_blank = hparams.add_blank
@@ -86,7 +84,7 @@ class TextAudioSpeakerLoader(Dataset[tuple[Any, ...]]):
         random.seed(1234)
         random.shuffle(self.audiopaths_sid_text)
         self._filter()
-        if self.use_external_speaker_embedding:
+        if self.use_speaker_embedding:
             self._build_speaker_to_audio_paths()
 
     def _filter(self) -> None:
@@ -143,9 +141,9 @@ class TextAudioSpeakerLoader(Dataset[tuple[Any, ...]]):
         ) in self.audiopaths_sid_text:
             self.speaker_to_audio_paths.setdefault(spk, []).append(audiopath)
 
-    def _select_external_embedding_audio_path(self, audiopath: str, spk: str) -> str:
+    def _select_speaker_embedding_audio_path(self, audiopath: str, spk: str) -> str:
         """
-        外部 speaker embedding の参照元を選択する。
+        speaker embedding の参照元を選択する。
 
         Args:
             audiopath (str): 対象音声のパス
@@ -192,31 +190,31 @@ class TextAudioSpeakerLoader(Dataset[tuple[Any, ...]]):
         spec, wav = self.get_audio(audiopath)
         sid = torch.LongTensor([int(self.spk_map[sid])])
         style_vec = torch.FloatTensor(np.load(f"{audiopath}.npy"))
-        external_speaker_embedding: torch.Tensor | None = None
-        if self.use_external_speaker_embedding:
-            reference_audio_path = self._select_external_embedding_audio_path(
+        speaker_embedding: torch.Tensor | None = None
+        if self.use_speaker_embedding:
+            reference_audio_path = self._select_speaker_embedding_audio_path(
                 audiopath, speaker_name
             )
-            external_speaker_embedding_path = Path(f"{reference_audio_path}.spk.npy")
-            if not external_speaker_embedding_path.exists():
+            speaker_embedding_path = Path(f"{reference_audio_path}.spk.npy")
+            if not speaker_embedding_path.exists():
                 raise FileNotFoundError(
-                    "External speaker embedding not found. "
+                    "Speaker embedding not found. "
                     f"speaker: {speaker_name}, audio: {audiopath}, "
-                    f"expected: {external_speaker_embedding_path}"
+                    f"expected: {speaker_embedding_path}"
                 )
             try:
-                external_speaker_embedding = torch.FloatTensor(
-                    np.load(external_speaker_embedding_path)
+                speaker_embedding = torch.FloatTensor(
+                    np.load(speaker_embedding_path)
                 ).reshape(-1)
             except Exception as ex:
                 raise RuntimeError(
-                    "Failed to load external speaker embedding. "
+                    "Failed to load speaker embedding. "
                     f"speaker: {speaker_name}, audio: {audiopath}, "
-                    f"path: {external_speaker_embedding_path}"
+                    f"path: {speaker_embedding_path}"
                 ) from ex
         if self.use_jp_extra:
-            if self.use_external_speaker_embedding:
-                assert external_speaker_embedding is not None
+            if self.use_speaker_embedding:
+                assert speaker_embedding is not None
                 return (
                     phones,
                     spec,
@@ -226,12 +224,12 @@ class TextAudioSpeakerLoader(Dataset[tuple[Any, ...]]):
                     language,
                     ja_bert,
                     style_vec,
-                    external_speaker_embedding,
+                    speaker_embedding,
                 )
             return (phones, spec, wav, sid, tone, language, ja_bert, style_vec)
         else:
-            if self.use_external_speaker_embedding:
-                assert external_speaker_embedding is not None
+            if self.use_speaker_embedding:
+                assert speaker_embedding is not None
                 return (
                     phones,
                     spec,
@@ -243,7 +241,7 @@ class TextAudioSpeakerLoader(Dataset[tuple[Any, ...]]):
                     ja_bert,
                     en_bert,
                     style_vec,
-                    external_speaker_embedding,
+                    speaker_embedding,
                 )
             return (
                 phones,
@@ -448,7 +446,7 @@ class TextAudioSpeakerCollate:
         self,
         return_ids: bool = False,
         use_jp_extra: bool = False,
-        use_external_speaker_embedding: bool = False,
+        use_speaker_embedding: bool = False,
     ):
         """
         TextAudioSpeakerCollate を初期化する。
@@ -456,12 +454,12 @@ class TextAudioSpeakerCollate:
         Args:
             return_ids (bool): ID を返すかどうか
             use_jp_extra (bool): JP-Extra モデルを使用するかどうか
-            use_external_speaker_embedding (bool): 外部話者埋め込みを使用するかどうか
+            use_speaker_embedding (bool): 話者埋め込みを使用するかどうか
         """
 
         self.return_ids = return_ids
         self.use_jp_extra = use_jp_extra
-        self.use_external_speaker_embedding = use_external_speaker_embedding
+        self.use_speaker_embedding = use_speaker_embedding
 
     def __call__(self, batch: list[tuple[Any, ...]]) -> tuple[Any, ...]:
         """
@@ -499,14 +497,14 @@ class TextAudioSpeakerCollate:
             ja_bert_padded = torch.FloatTensor(len(batch), 1024, max_text_len)
             en_bert_padded = torch.FloatTensor(len(batch), 1024, max_text_len)
         style_vec = torch.FloatTensor(len(batch), 256)
-        external_speaker_embedding: torch.Tensor | None = None
-        if self.use_external_speaker_embedding:
+        speaker_embedding: torch.Tensor | None = None
+        if self.use_speaker_embedding:
             if self.use_jp_extra:
-                external_embedding_index = 8
+                speaker_embedding_index = 8
             else:
-                external_embedding_index = 10
-            external_speaker_embedding = torch.FloatTensor(
-                len(batch), batch[0][external_embedding_index].numel()
+                speaker_embedding_index = 10
+            speaker_embedding = torch.FloatTensor(
+                len(batch), batch[0][speaker_embedding_index].numel()
             )
 
         spec_padded = torch.FloatTensor(len(batch), batch[0][1].size(0), max_spec_len)
@@ -523,9 +521,9 @@ class TextAudioSpeakerCollate:
             ja_bert_padded.zero_()
             en_bert_padded.zero_()
         style_vec.zero_()
-        if self.use_external_speaker_embedding:
-            assert external_speaker_embedding is not None
-            external_speaker_embedding.zero_()
+        if self.use_speaker_embedding:
+            assert speaker_embedding is not None
+            speaker_embedding.zero_()
 
         for i in range(len(ids_sorted_decreasing)):
             row = batch[ids_sorted_decreasing[i]]
@@ -555,9 +553,9 @@ class TextAudioSpeakerCollate:
 
             if self.use_jp_extra:
                 style_vec[i, :] = row[7]
-                if self.use_external_speaker_embedding:
-                    assert external_speaker_embedding is not None
-                    external_speaker_embedding[i, :] = row[8].reshape(-1)
+                if self.use_speaker_embedding:
+                    assert speaker_embedding is not None
+                    speaker_embedding[i, :] = row[8].reshape(-1)
             else:
                 ja_bert = row[7]
                 assert ja_bert_padded is not None
@@ -567,13 +565,13 @@ class TextAudioSpeakerCollate:
                 assert en_bert_padded is not None
                 en_bert_padded[i, :, : en_bert.size(1)] = en_bert
                 style_vec[i, :] = row[9]
-                if self.use_external_speaker_embedding:
-                    assert external_speaker_embedding is not None
-                    external_speaker_embedding[i, :] = row[10].reshape(-1)
+                if self.use_speaker_embedding:
+                    assert speaker_embedding is not None
+                    speaker_embedding[i, :] = row[10].reshape(-1)
 
         if self.use_jp_extra:
-            if self.use_external_speaker_embedding:
-                assert external_speaker_embedding is not None
+            if self.use_speaker_embedding:
+                assert speaker_embedding is not None
                 return (
                     text_padded,
                     text_lengths,
@@ -586,7 +584,7 @@ class TextAudioSpeakerCollate:
                     language_padded,
                     bert_padded,
                     style_vec,
-                    external_speaker_embedding,
+                    speaker_embedding,
                 )
             return (
                 text_padded,
@@ -602,8 +600,8 @@ class TextAudioSpeakerCollate:
                 style_vec,
             )
         else:
-            if self.use_external_speaker_embedding:
-                assert external_speaker_embedding is not None
+            if self.use_speaker_embedding:
+                assert speaker_embedding is not None
                 assert ja_bert_padded is not None
                 assert en_bert_padded is not None
                 return (
@@ -620,7 +618,7 @@ class TextAudioSpeakerCollate:
                     ja_bert_padded,
                     en_bert_padded,
                     style_vec,
-                    external_speaker_embedding,
+                    speaker_embedding,
                 )
             assert ja_bert_padded is not None
             assert en_bert_padded is not None

@@ -87,9 +87,9 @@ def get_net_g(
                 use_spectral_norm=hps.model.use_spectral_norm,
                 gin_channels=hps.model.gin_channels,
                 slm=hps.model.slm,
-                use_external_speaker_adapter=hps.model.use_external_speaker_adapter,
-                external_speaker_embedding_dim=hps.model.external_speaker_embedding_dim,
-                external_speaker_adapter_hidden_dim=hps.model.external_speaker_adapter_hidden_dim,
+                use_speaker_adapter=hps.model.use_speaker_adapter,
+                speaker_adapter_input_dim=hps.model.speaker_adapter_input_dim,
+                speaker_adapter_bottleneck_dim=hps.model.speaker_adapter_bottleneck_dim,
             ).to(device)
         elif version.endswith("JP-Extra"):
             logger.info("Using JP-Extra model")
@@ -771,11 +771,12 @@ def infer(
     use_fp16: bool = False,
     clear_cuda_cache: bool = True,
     enable_tensor_padding: bool = False,
-    external_speaker_embedding: NDArray[Any] | torch.Tensor | None = None,
+    speaker_embedding: NDArray[Any] | torch.Tensor | None = None,
     g_adjust: NDArray[Any] | torch.Tensor | None = None,
 ) -> NDArray[np.float32]:
     """
     PyTorch 版音声合成モデルの推論を実行する関数。
+    Nanairo（`use_speaker_adapter`）では、`speaker_embedding` に anime-speaker-embedding 由来のベクトル（例: `.spk.npy`）を渡す。
     """
     is_jp_extra_like_model = hps.is_jp_extra_like_model()
 
@@ -828,23 +829,19 @@ def infer(
         if (
             is_jp_extra_like_model
             and not hps.version.endswith("Nanairo")
-            and (external_speaker_embedding is not None or g_adjust is not None)
+            and (speaker_embedding is not None or g_adjust is not None)
         ):
             raise ValueError(
-                "External speaker embedding or g adjustment is only supported for Nanairo."
+                "speaker_embedding or g_adjust is only supported for Nanairo."
             )
 
         if is_jp_extra_like_model:
-            if isinstance(external_speaker_embedding, np.ndarray):
-                external_speaker_embedding = torch.from_numpy(
-                    external_speaker_embedding
-                )
+            if isinstance(speaker_embedding, np.ndarray):
+                speaker_embedding = torch.from_numpy(speaker_embedding)
             if isinstance(g_adjust, np.ndarray):
                 g_adjust = torch.from_numpy(g_adjust)
-            if isinstance(external_speaker_embedding, torch.Tensor):
-                external_speaker_embedding = external_speaker_embedding.to(
-                    device
-                ).float()
+            if isinstance(speaker_embedding, torch.Tensor):
+                speaker_embedding = speaker_embedding.to(device).float()
             if isinstance(g_adjust, torch.Tensor):
                 g_adjust = g_adjust.to(device).float()
             if hps.version.endswith("Nanairo"):
@@ -863,7 +860,7 @@ def infer(
                     use_fp16=use_fp16,
                     durations_frames_override=durations_frames_override,
                     durations_frames_override_mask=durations_frames_override_mask,
-                    external_spk_emb=external_speaker_embedding,
+                    speaker_embedding=speaker_embedding,
                     g_adjust=g_adjust,
                 )
             else:

@@ -1,5 +1,5 @@
 """
-External speaker embedding から g をダンプするスクリプト。
+学習用 .spk.npy (anime-speaker-embedding) から g をダンプするスクリプト。
 """
 
 from __future__ import annotations
@@ -73,14 +73,15 @@ def _load_entries(list_path: Path) -> list[dict[str, str]]:
     return entries
 
 
-def _load_external_embedding(audio_path: str) -> NDArray[Any]:
+def _load_speaker_embedding(audio_path: str) -> NDArray[Any]:
     """
-    外部 speaker embedding を読み込む。
+    speaker embedding (.spk.npy) を読み込む。
 
     Args:
         audio_path (str): 音声ファイルのパス
+
     Returns:
-        np.ndarray: speaker embedding
+        NDArray[Any]: speaker embedding
     """
 
     embedding_path = f"{audio_path}.spk.npy"
@@ -89,7 +90,7 @@ def _load_external_embedding(audio_path: str) -> NDArray[Any]:
 
 def main() -> None:
     """
-    外部 speaker embedding から g を生成し、npz と JSONL に保存する。
+    speaker embedding (.spk.npy) から g を生成し、npz と JSONL に保存する。
     """
 
     args = _parse_args()
@@ -102,8 +103,8 @@ def main() -> None:
     output_meta = Path(args.output_meta)
 
     hps = HyperParameters.load_from_json(config_path)
-    if hps.model.use_external_speaker_adapter is not True:
-        raise ValueError("use_external_speaker_adapter must be true.")
+    if hps.model.use_speaker_adapter is not True:
+        raise ValueError("use_speaker_adapter must be true.")
 
     net_g = get_net_g(
         model_path=str(model_path),
@@ -112,24 +113,26 @@ def main() -> None:
         hps=hps,
     )
     net_g.eval()
-    if getattr(net_g, "ext_spk_adapter", None) is None:
-        raise ValueError("External speaker adapter is not initialized.")
 
     entries = _load_entries(list_path)
     g_list: list[NDArray[np.float32]] = []
 
     output_meta.parent.mkdir(parents=True, exist_ok=True)
     net_g_nanairo = cast(SynthesizerTrnNanairo, net_g)
-    assert net_g_nanairo.ext_spk_adapter is not None, (
-        "External speaker adapter is not initialized"
-    )
+    # Pyright が nn.Module 属性の Optional を絞り込めるよう、直接参照してから検証する
+    speaker_control_encoder = net_g_nanairo.speaker_control_encoder
+    speaker_adapter = net_g_nanairo.speaker_adapter
+    if speaker_control_encoder is None or speaker_adapter is None:
+        raise ValueError("Speaker control encoder and adapter are not initialized.")
     with output_meta.open("w", encoding="utf-8") as meta_file, torch.inference_mode():
         for idx, entry in enumerate(entries):
-            embedding = _load_external_embedding(entry["audio_path"])
+            embedding = _load_speaker_embedding(entry["audio_path"])
             embedding_tensor = torch.from_numpy(embedding).float().to(args.device)
             if embedding_tensor.dim() == 1:
                 embedding_tensor = embedding_tensor.unsqueeze(0)
-            g_tensor = net_g_nanairo.ext_spk_adapter(embedding_tensor)
+            # g_neutral にゲート付き SpeakerAdapter の出力を加算して g を求める
+            ctrl = speaker_control_encoder(embedding_tensor)
+            g_tensor = net_g_nanairo.g_neutral + speaker_adapter(ctrl)
             g = g_tensor.squeeze(0).detach().cpu().numpy().astype(np.float32)
             g_list.append(g)
 

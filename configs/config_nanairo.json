@@ -18,6 +18,8 @@
     "c_mel": 45,
     "c_kl": 1.0,
     "c_commit": 100,
+    "c_teacher": 0.1,
+    "c_delta_l2": 0.01,
     "skip_optimizer": false,
     "freeze_ZH_bert": false,
     "freeze_JP_bert": false,
@@ -25,7 +27,7 @@
     "freeze_emo": false,
     "freeze_style": false,
     "freeze_decoder": false,
-    "train_external_speaker_adapter_only": true,
+    "train_speaker_adapter_only": true,
     "disable_discriminators_for_adapter": true
   },
   "data": {
@@ -43,7 +45,7 @@
     "add_blank": true,
     "n_speakers": 512,
     "cleaned_text": true,
-    "use_external_speaker_embedding": true
+    "use_speaker_embedding": true
   },
   "model": {
     "use_spk_conditioned_encoder": true,
@@ -71,9 +73,9 @@
     "n_layers_q": 3,
     "use_spectral_norm": false,
     "gin_channels": 512,
-    "use_external_speaker_adapter": true,
-    "external_speaker_embedding_dim": 192,
-    "external_speaker_adapter_hidden_dim": 512,
+    "use_speaker_adapter": true,
+    "speaker_adapter_input_dim": 192,
+    "speaker_adapter_bottleneck_dim": 48,
     "slm": {
       "model": "./slm/wavlm-base-plus",
       "sr": 16000,

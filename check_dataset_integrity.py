@@ -88,15 +88,15 @@ def _warn_missing(
 
 def _check_entries(
     entries: list[list[str]],
-    use_external_speaker_embedding: bool,
+    use_speaker_embedding: bool,
     max_errors: int,
 ) -> tuple[set[str], int]:
     """
-    音声 / style / BERT / external embedding の存在チェックを行う。
+    音声 / style / BERT / speaker embedding の存在チェックを行う。
 
     Args:
         entries (list[list[str]]): list エントリ
-        use_external_speaker_embedding (bool): external embedding の有無
+        use_speaker_embedding (bool): speaker embedding の有無
         max_errors (int): 表示する最大件数
 
     Returns:
@@ -106,7 +106,7 @@ def _check_entries(
     missing_audio: list[str] = []
     missing_bert: list[str] = []
     missing_style: list[str] = []
-    missing_external: list[str] = []
+    missing_speaker_embedding: list[str] = []
     speakers: set[str] = set()
 
     for fields in entries:
@@ -128,22 +128,22 @@ def _check_entries(
         if not Path(style_path).exists():
             missing_style.append(style_path)
 
-        if use_external_speaker_embedding:
-            external_path = f"{audio_path}.spk.npy"
-            if not Path(external_path).exists():
-                missing_external.append(external_path)
+        if use_speaker_embedding:
+            speaker_embedding_path = f"{audio_path}.spk.npy"
+            if not Path(speaker_embedding_path).exists():
+                missing_speaker_embedding.append(speaker_embedding_path)
 
     _warn_missing("Audio", missing_audio, max_errors)
     _warn_missing("Style", missing_style, max_errors)
     _warn_missing("BERT", missing_bert, max_errors)
-    if use_external_speaker_embedding:
-        _warn_missing("External embedding", missing_external, max_errors)
+    if use_speaker_embedding:
+        _warn_missing("Speaker embedding", missing_speaker_embedding, max_errors)
 
     missing_total = (
         len(missing_audio)
         + len(missing_style)
         + len(missing_bert)
-        + len(missing_external)
+        + len(missing_speaker_embedding)
     )
     return speakers, missing_total
 
@@ -168,12 +168,12 @@ def main() -> None:
 
     speakers_train, missing_train = _check_entries(
         train_entries,
-        hps.data.use_external_speaker_embedding,
+        hps.data.use_speaker_embedding,
         args.max_errors,
     )
     speakers_val, missing_val = _check_entries(
         val_entries,
-        hps.data.use_external_speaker_embedding,
+        hps.data.use_speaker_embedding,
         args.max_errors,
     )
     speakers_all = speakers_train | speakers_val

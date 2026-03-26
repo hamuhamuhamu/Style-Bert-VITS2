@@ -296,7 +296,7 @@ include = [
     # 前処理スクリプト
     "bert_gen.py",
     "check_dataset_integrity.py",
-    "external_spk_emb_gen.py",
+    "speaker_embedding_gen.py",
     "preprocess_all.py",
     "preprocess_text.py",
     "resample.py",

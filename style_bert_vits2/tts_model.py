@@ -489,7 +489,7 @@ class TTSModel:
         given_tone: list[int] | None = None,
         pitch_scale: float = 1.0,
         intonation_scale: float = 1.0,
-        external_speaker_embedding: NDArray[Any] | None = None,
+        speaker_embedding: NDArray[Any] | None = None,
         g_adjust: NDArray[Any] | None = None,
         null_model_params: dict[int, NullModelParam] | None = None,
         force_reload_model: bool = False,
@@ -502,10 +502,10 @@ class TTSModel:
             language (Languages, optional): 言語. Defaults to Languages.JP.
             speaker_id (int, optional): 話者 ID. Defaults to 0.
             reference_audio_path (str | None, optional): 音声スタイルの参照元の音声ファイルのパス. Defaults to None.
-            sdp_ratio (float, optional): DP と SDP の混合比。0 で DP のみ、1で SDP のみを使用 (値を大きくするとテンポに緩急がつく). Defaults to DEFAULT_SDP_RATIO.
+            sdp_ratio (float, optional): DP と SDP の混合比. 0 で DP のみ、1で SDP のみを使用 (値を大きくするとテンポに緩急がつく). Defaults to DEFAULT_SDP_RATIO.
             noise (float, optional): DP に与えられるノイズ. Defaults to DEFAULT_NOISE.
             noise_w (float, optional): SDP に与えられるノイズ. Defaults to DEFAULT_NOISEW.
-            length (float, optional): 生成音声の長さ（話速）のパラメータ。大きいほど生成音声が長くゆっくり、小さいほど短く早くなる。 Defaults to DEFAULT_LENGTH.
+            length (float, optional): 生成音声の長さ（話速）のパラメータ. 大きいほど生成音声が長くゆっくり、小さいほど短く早くなる. Defaults to DEFAULT_LENGTH.
             line_split (bool, optional): テキストを改行ごとに分割して生成するかどうか (True の場合 given_phone/given_tone は無視される). Defaults to DEFAULT_LINE_SPLIT.
             split_interval (float, optional): 改行ごとに分割する場合の無音 (秒). Defaults to DEFAULT_SPLIT_INTERVAL.
             assist_text (str | None, optional): 感情表現の参照元の補助テキスト. Defaults to None.
@@ -513,14 +513,14 @@ class TTSModel:
             use_assist_text (bool, optional): 音声合成時に感情表現の補助テキストを使用するかどうか. Defaults to False.
             style (str, optional): 音声スタイル (Neutral, Happy など). Defaults to DEFAULT_STYLE.
             style_weight (float, optional): 音声スタイルを適用する強さ. Defaults to DEFAULT_STYLE_WEIGHT.
-            given_phone (list[str] | None, optional): 読み上げテキストの読みを表す音素列。指定する場合は given_tone も別途指定が必要. Defaults to None.
-            given_phone_length (list[float | None] | None, optional): 音素長（秒）のリスト。None または 0.0 以下は未指定として扱われる。given_phone と同じ長さである必要がある。Defaults to None.
+            given_phone (list[str] | None, optional): 読み上げテキストの読みを表す音素列. 指定する場合は given_tone も別途指定が必要. Defaults to None.
+            given_phone_length (list[float | None] | None, optional): 音素長（秒）のリスト. None または 0.0 以下は未指定として扱われる. given_phone と同じ長さである必要がある. Defaults to None.
             given_tone (list[int] | None, optional): アクセントのトーンのリスト. Defaults to None.
             pitch_scale (float, optional): ピッチの高さ (1.0 から変更すると若干音質が低下する). Defaults to 1.0.
             intonation_scale (float, optional): 抑揚の平均からの変化幅 (1.0 から変更すると若干音質が低下する). Defaults to 1.0.
-            external_speaker_embedding (NDArray[Any] | None, optional): 外部 Speaker Embedding 。Defaults to None.
-            g_adjust (NDArray[Any] | None, optional): g 空間の加算ベクトル。Defaults to None.
-            null_model_params (dict[int, NullModelParam] | None, optional): 推論時に使用するヌルモデルの情報。ONNX 推論では無視される。
+            speaker_embedding (NDArray[Any] | None, optional): anime-speaker-embedding 等から得た話者ベクトル (.spk.npy). Defaults to None.
+            g_adjust (NDArray[Any] | None, optional): g 空間の加算ベクトル. Defaults to None.
+            null_model_params (dict[int, NullModelParam] | None, optional): 推論時に使用するヌルモデルの情報. ONNX 推論では無視される.
             force_reload_model (bool, optional): モデルを強制的に再ロードするかどうか. Defaults to False.
         Returns:
             tuple[int, NDArray[Any]]: サンプリングレートと音声データ (16bit PCM)
@@ -545,10 +545,10 @@ class TTSModel:
                 reference_audio_path, style_weight
             )
         if self.is_onnx_model and (
-            external_speaker_embedding is not None or g_adjust is not None
+            speaker_embedding is not None or g_adjust is not None
         ):
             raise NotImplementedError(
-                "External speaker embedding and g adjustment are not supported for ONNX inference."
+                "speaker_embedding and g_adjust are not supported for ONNX inference."
             )
 
         # PyTorch 推論時
@@ -593,7 +593,7 @@ class TTSModel:
                         given_phone_length=given_phone_length,
                         given_tone=given_tone,
                         use_fp16=self.use_fp16,
-                        external_speaker_embedding=external_speaker_embedding,
+                        speaker_embedding=speaker_embedding,
                         g_adjust=g_adjust,
                     )
 
@@ -620,7 +620,7 @@ class TTSModel:
                                 assist_text_weight=assist_text_weight,
                                 style_vec=style_vector,
                                 use_fp16=self.use_fp16,
-                                external_speaker_embedding=external_speaker_embedding,
+                                speaker_embedding=speaker_embedding,
                                 g_adjust=g_adjust,
                             )
                         )
