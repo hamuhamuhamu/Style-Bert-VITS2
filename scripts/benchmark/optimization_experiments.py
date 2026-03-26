@@ -1,5 +1,5 @@
 """
-Usage: .venv/bin/python -m scripts.benchmark.optimization_experiments [--device cuda:0] [--model-name 10-hinataanna] [--num-runs 3]
+Usage: uv run python -m scripts.benchmark.optimization_experiments [--device cuda:0] [--model-name 10-hinataanna] [--num-runs 3]
 
 Style-Bert-VITS2 の推論高速化施策を比較検証するためのスクリプト。
 

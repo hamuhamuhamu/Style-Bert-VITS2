@@ -26,6 +26,7 @@ def save_neutral_vector(
 
     wav_dir = Path(wav_dir)
     output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
     embs: list[np.ndarray] = []
     for file in wav_dir.rglob("*.npy"):
         xvec = np.load(file)

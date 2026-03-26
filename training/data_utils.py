@@ -279,7 +279,7 @@ class TextAudioSpeakerLoader(Dataset[tuple[Any, ...]]):
             spec_filename = spec_filename.replace(".spec.pt", ".mel.pt")
         try:
             spec = torch.load(spec_filename)
-        except:
+        except Exception:
             if self.use_mel_spec_posterior:
                 assert self.hparams.mel_fmin is not None
                 assert self.hparams.mel_fmax is not None

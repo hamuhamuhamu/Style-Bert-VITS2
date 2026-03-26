@@ -1,5 +1,5 @@
 """
-Usage: .venv/bin/python -m scripts.benchmark.bert_int8_benchmark [--device cuda] [--model koharune-ami] [--warmup-runs 2] [--test-runs 3]
+Usage: uv run python -m scripts.benchmark.bert_int8_benchmark [--device cuda] [--model koharune-ami] [--warmup-runs 2] [--test-runs 3]
 
 BERT 8bit 量子化の音声合成品質への影響評価テストスクリプト
 

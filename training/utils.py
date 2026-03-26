@@ -255,7 +255,17 @@ def check_git_hash(model_dir_path: str | Path) -> None:
         )
         return
 
-    cur_hash = subprocess.getoutput("git rev-parse HEAD")
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        cur_hash = result.stdout.strip()
+    except (FileNotFoundError, subprocess.CalledProcessError) as ex:
+        logger.warning(f"Failed to get git hash: {ex}")
+        return
 
     path = os.path.join(model_dir_path, "githash")
     if os.path.exists(path):

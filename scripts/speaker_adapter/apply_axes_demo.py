@@ -90,16 +90,21 @@ def main() -> None:
     output_dir = Path(args.output_dir)
     speaker_embedding_path = Path(args.speaker_embedding)
 
+    axes_npz_path = Path(args.axes_npz)
+    axes_json_path = Path(args.axes_json)
+
     for required_path in (
         model_path,
         config_path,
         style_vec_path,
         speaker_embedding_path,
+        axes_npz_path,
+        axes_json_path,
     ):
         if not required_path.exists():
             raise FileNotFoundError(f"Required file not found: {required_path}")
 
-    axis = _load_axis(Path(args.axes_npz), Path(args.axes_json), args.axis_name)
+    axis = _load_axis(axes_npz_path, axes_json_path, args.axis_name)
     speaker_embedding = np.load(speaker_embedding_path)
 
     tts_model = TTSModel(

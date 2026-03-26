@@ -1,5 +1,5 @@
 """
-Usage: .venv/bin/python -m scripts.benchmark.long_inference_benchmark [--device cuda] [--model koharune-ami] [--runs 5]
+Usage: uv run python -m scripts.benchmark.long_inference_benchmark [--device cuda] [--model koharune-ami] [--runs 5]
 
 Style-Bert-VITS2 長文一括推論のパフォーマンス測定スクリプト
 
@@ -88,7 +88,7 @@ def measure_infer_performance(
     if device == "cuda":
         torch.cuda.reset_peak_memory_stats()
         torch.cuda.empty_cache()
-        print("CUDA キャッシュをクリアしました")
+        logger.info("CUDA キャッシュをクリアしました")
 
     start_time = time.perf_counter()
 
@@ -284,7 +284,7 @@ def run_benchmark(
             print("  測定に失敗しました。")
             continue
 
-        # 初回はロードが入るため捨てる
+        # 初回はモデル初期化等のオーバーヘッドが含まれるためスキップ
         if i == 0:
             continue
 

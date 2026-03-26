@@ -1,5 +1,5 @@
 """
-Usage: .venv/bin/python -m scripts.benchmark.torch_compile_benchmark [--device cuda] [--model koharune-ami] [--runs 10]
+Usage: uv run python -m scripts.benchmark.torch_compile_benchmark [--device cuda] [--model koharune-ami] [--runs 10]
 
 Generator モジュールに torch.compile を適用して、パフォーマンス改善効果を測定するベンチマークスクリプト。
 

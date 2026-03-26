@@ -1,5 +1,5 @@
 """
-Usage: PYTORCH_CUDA_ALLOC_CONF="backend:cudaMallocAsync,expandable_segments:True" .venv/bin/python -m scripts.benchmark.tensor_padding_benchmark [--device cuda] [--model koharune-ami] [--iterations 30]
+Usage: PYTORCH_CUDA_ALLOC_CONF="backend:cudaMallocAsync,expandable_segments:True" uv run python -m scripts.benchmark.tensor_padding_benchmark [--device cuda] [--model koharune-ami] [--iterations 30]
 
 メモリ効率化テンソルパディングのベンチマークスクリプト
 """
@@ -8,6 +8,7 @@ import argparse
 import gc
 import time
 from pathlib import Path
+from typing import TypedDict
 
 import numpy as np
 import torch
@@ -107,12 +108,21 @@ TEST_TEXTS = [
 ]
 
 
+class MemorySnapshot(TypedDict):
+    """メモリスナップショットの型定義"""
+
+    label: str
+    allocated_gb: float
+    reserved_gb: float
+    fragmentation_gb: float
+
+
 class MemoryTracker:
     """GPU メモリ使用量を追跡するクラス"""
 
     def __init__(self, device: str):
         self.device = device
-        self.snapshots: list[dict[str, float]] = []
+        self.snapshots: list[MemorySnapshot] = []
 
     def snapshot(self, label: str):
         """現在のメモリ使用量をスナップショット"""
@@ -124,12 +134,12 @@ class MemoryTracker:
             allocated = reserved = fragmentation = 0.0
 
         self.snapshots.append(
-            {
-                "label": label,  # type: ignore
-                "allocated_gb": allocated,
-                "reserved_gb": reserved,
-                "fragmentation_gb": fragmentation,
-            }
+            MemorySnapshot(
+                label=label,
+                allocated_gb=allocated,
+                reserved_gb=reserved,
+                fragmentation_gb=fragmentation,
+            )
         )
 
     def print_report(self):

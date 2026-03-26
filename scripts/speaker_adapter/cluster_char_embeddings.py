@@ -171,6 +171,11 @@ def _kmeans_cosine(
         tuple[np.ndarray, np.ndarray]: クラスタ割当 (N,), セントロイド (K, D)
     """
 
+    if len(embeddings) < k:
+        raise ValueError(
+            f"Not enough embeddings for {k} clusters: got {len(embeddings)} embeddings."
+        )
+
     rng = np.random.default_rng(seed)
     indices = rng.choice(len(embeddings), size=k, replace=False)
     centroids = embeddings[indices]

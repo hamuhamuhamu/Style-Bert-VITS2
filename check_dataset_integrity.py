@@ -139,12 +139,9 @@ def _check_entries(
     if use_speaker_embedding:
         _warn_missing("Speaker embedding", missing_speaker_embedding, max_errors)
 
-    missing_total = (
-        len(missing_audio)
-        + len(missing_style)
-        + len(missing_bert)
-        + len(missing_speaker_embedding)
-    )
+    missing_total = len(missing_audio) + len(missing_style) + len(missing_bert)
+    if use_speaker_embedding:
+        missing_total += len(missing_speaker_embedding)
     return speakers, missing_total
 
 

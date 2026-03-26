@@ -51,7 +51,7 @@ def normalize_audio(data: NDArray[Any], sr: int) -> NDArray[Any]:
     try:
         loudness = meter.integrated_loudness(data)
     except ValueError as ex:
-        raise BlockSizeException(ex)
+        raise BlockSizeException(ex) from ex
 
     data = pyln.normalize.loudness(data, loudness, -23.0)
     return data

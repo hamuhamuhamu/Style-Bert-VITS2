@@ -1,5 +1,5 @@
-# Usage: .venv/bin/python convert_onnx.py --model model_assets/koharune-ami/koharune-ami.safetensors
-#        .venv/bin/python convert_onnx.py --model model_assets/ (All models in the directory will be converted)
+# Usage: uv run python convert_onnx.py --model model_assets/koharune-ami/koharune-ami.safetensors
+#        uv run python convert_onnx.py --model model_assets/ (All models in the directory will be converted)
 
 # https://github.com/tuna2134/sbv2-api/blob/main/scripts/convert/convert_model.py を参考に実装した
 #

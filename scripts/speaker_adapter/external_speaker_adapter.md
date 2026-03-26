@@ -129,7 +129,7 @@ L_delta_l2 = mean(delta^2)
 各音声ファイル `xxx.wav` に対して `xxx.wav.spk.npy` を用意します。
 
 ```bash
-.venv/bin/python speaker_embedding_gen.py --model YourModel --skip_existing
+uv run python speaker_embedding_gen.py --model YourModel --skip_existing
 ```
 
 ### 2. 必要ならクラスタリングで話者ラベルを見直す
@@ -137,7 +137,7 @@ L_delta_l2 = mean(delta^2)
 Char embedding ベースで自動クラスタリングできます。
 
 ```bash
-.venv/bin/python scripts/speaker_adapter/cluster_char_embeddings.py \
+uv run python scripts/speaker_adapter/cluster_char_embeddings.py \
   --model YourModel \
   --dry_run \
   --skip_existing
@@ -157,7 +157,7 @@ Char embedding ベースで自動クラスタリングできます。
 学習実行例です。
 
 ```bash
-.venv/bin/python train_ms_nanairo.py --model YourModel
+uv run python train_ms_nanairo.py --model YourModel
 ```
 
 Adapter-only 学習時は VITS2 本体を凍結し、`SpeakerControlEncoder` と `SpeakerAdapter` のみ更新します。
@@ -192,7 +192,7 @@ sr, audio = tts_model.infer(
 ### g ダンプ
 
 ```bash
-.venv/bin/python scripts/speaker_adapter/dump_g.py \
+uv run python scripts/speaker_adapter/dump_g.py \
   --model YourModel \
   --checkpoint G_0.safetensors \
   --output_npz outputs/g_dump.npz \
@@ -202,7 +202,7 @@ sr, audio = tts_model.infer(
 ### 軸抽出
 
 ```bash
-.venv/bin/python scripts/speaker_adapter/extract_axes.py \
+uv run python scripts/speaker_adapter/extract_axes.py \
   --model YourModel \
   --g_npz outputs/g_dump.npz \
   --meta_jsonl outputs/g_dump.jsonl \
@@ -212,7 +212,7 @@ sr, audio = tts_model.infer(
 ### 方向操作デモ
 
 ```bash
-.venv/bin/python scripts/speaker_adapter/apply_axes_demo.py \
+uv run python scripts/speaker_adapter/apply_axes_demo.py \
   --model YourModel \
   --checkpoint G_0.safetensors \
   --text 'こんにちは' \
@@ -227,7 +227,7 @@ sr, audio = tts_model.infer(
 ### cosine 評価
 
 ```bash
-.venv/bin/python scripts/speaker_adapter/eval_speaker_similarity.py \
+uv run python scripts/speaker_adapter/eval_speaker_similarity.py \
   --pairs_jsonl outputs/eval_pairs.jsonl \
   --output_json outputs/eval_result.json
 ```

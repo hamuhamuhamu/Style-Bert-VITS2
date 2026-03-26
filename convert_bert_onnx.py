@@ -1,4 +1,4 @@
-# Usage: .venv/bin/python convert_bert_onnx.py --language JP
+# Usage: uv run python convert_bert_onnx.py --language JP
 
 # https://github.com/tuna2134/sbv2-api/blob/main/scripts/convert/convert_deberta.py を参考に実装した
 #

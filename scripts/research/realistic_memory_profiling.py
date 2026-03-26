@@ -1,5 +1,5 @@
 """
-Usage: PYTORCH_CUDA_ALLOC_CONF="backend:cudaMallocAsync,expandable_segments:True" .venv/bin/python -m scripts.research.realistic_memory_profiling [--device cuda] [--iterations 50] [--interval 2] [--enable-padding]
+Usage: PYTORCH_CUDA_ALLOC_CONF="backend:cudaMallocAsync,expandable_segments:True" uv run python -m scripts.research.realistic_memory_profiling [--device cuda] [--iterations 50] [--interval 2] [--enable-padding]
 
 実環境再現型メモリプロファイリングスクリプト
 

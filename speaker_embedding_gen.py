@@ -66,10 +66,11 @@ def main() -> None:
     model_folder_name: str = args.model
     paths = TrainingModelPaths(model_folder_name)
 
-    # train.list と val.list から音声パスを取得
-    audio_paths: list[str] = []
-    audio_paths.extend(get_audio_paths(paths.train_list_path))
-    audio_paths.extend(get_audio_paths(paths.val_list_path))
+    # train.list と val.list から音声パスを取得し、重複を除去する
+    audio_paths_raw: list[str] = []
+    audio_paths_raw.extend(get_audio_paths(paths.train_list_path))
+    audio_paths_raw.extend(get_audio_paths(paths.val_list_path))
+    audio_paths = list(dict.fromkeys(audio_paths_raw))
 
     if len(audio_paths) == 0:
         raise ValueError("No audio paths found in list files.")
@@ -85,17 +86,21 @@ def main() -> None:
         if (i + 1) % 100 == 0 or i == 0:
             logger.info(f"Processing {i + 1}/{len(audio_paths)}: {audio_path}")
 
-        embedding = model.get_embedding(audio_path)
-        embedding = np.asarray(embedding, dtype=np.float32).reshape(-1)
+        try:
+            embedding = model.get_embedding(audio_path)
+            embedding = np.asarray(embedding, dtype=np.float32).reshape(-1)
 
-        # L2 正規化: embedding のノルムを 1 に揃える
-        # ノルムがばらつくと Adapter の学習が不安定になるため、事前に正規化して保存する
-        embedding_norm = np.linalg.norm(embedding)
-        if embedding_norm > 0:
-            embedding = embedding / embedding_norm
+            # L2 正規化: embedding のノルムを 1 に揃える
+            # ノルムがばらつくと Adapter の学習が不安定になるため、事前に正規化して保存する
+            embedding_norm = np.linalg.norm(embedding)
+            if embedding_norm > 0:
+                embedding = embedding / embedding_norm
 
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        np.save(output_path, embedding)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            np.save(output_path, embedding)
+        except Exception as ex:
+            logger.error(f"Failed to extract embedding: {audio_path}", exc_info=ex)
+            continue
 
     logger.info("Embedding extraction finished.")
 

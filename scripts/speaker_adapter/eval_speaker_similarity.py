@@ -41,10 +41,15 @@ def _load_pairs(path: Path) -> list[dict[str, str]]:
 
     pairs = []
     with path.open("r", encoding="utf-8") as f:
-        for line in f:
+        for line_number, line in enumerate(f, start=1):
             if line.strip() == "":
                 continue
-            pairs.append(json.loads(line))
+            try:
+                pairs.append(json.loads(line))
+            except json.JSONDecodeError as ex:
+                raise ValueError(
+                    f"Invalid JSON at {path}:{line_number}: {line.strip()!r}"
+                ) from ex
     return pairs
 
 
@@ -77,7 +82,7 @@ def _cosine_similarity(a: NDArray[Any], b: NDArray[Any]) -> float:
     """
 
     denom = np.linalg.norm(a) * np.linalg.norm(b)
-    if denom == 0:
+    if denom < 1e-12:
         return 0.0
     return float(np.dot(a, b) / denom)
 

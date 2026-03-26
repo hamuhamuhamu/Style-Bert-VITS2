@@ -1,5 +1,5 @@
 """
-Usage: .venv/bin/python -m scripts.benchmark.module_timing_benchmark [--device cuda] [--model koharune-ami] [--runs 5]
+Usage: uv run python -m scripts.benchmark.module_timing_benchmark [--device cuda] [--model koharune-ami] [--runs 5]
 
 各モジュール（TextEncoder, DurationPredictor, Flow, Generator）の実行時間を計測し、
 入力長に対するスケーリングを分析するベンチマークスクリプト。
