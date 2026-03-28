@@ -74,18 +74,23 @@ torch = [
 ## Usage: uv sync (or: uv sync --group core)
 core = [
     # ONNX Runtime 関連 (project.optional-dependencies.onnxruntime に相当)
-    # 必須依存関係なので、単体利用時はインストールされるバリアントを上記と同じロジックで固定する
+    ## 必須依存関係なので、単体利用時はインストールされるバリアントを上記と同じロジックで固定する
     "onnxruntime; (sys_platform != 'linux' or platform_machine != 'x86_64') and sys_platform != 'win32'",
     "onnxruntime-directml; sys_platform == 'win32'",
     "onnxruntime-gpu; sys_platform == 'linux' and platform_machine == 'x86_64'",
     # PyTorch 関連 (project.optional-dependencies.torch に相当)
-    # 単体利用で ONNX 版推論だけ回すユースケースは極めて考えづらいので、常に PyTorch 関連も必須依存関係に含める
-    # PyTorch のバリアントは tool.uv.sources で torch / torchaudio のソース指定で固定している
+    ## 単体利用で ONNX 版推論だけ回すユースケースは極めて考えづらいので、常に PyTorch 関連も必須依存関係に含める
+    ## PyTorch のバリアントは tool.uv.sources で torch / torchaudio のソース指定で固定している
     "accelerate",
     "numba",
     "torch>=2.9.1,<2.10.0",
+    # torchcodec 0.11.0 は .so が CUDA ランタイムに直リンクされており、
+    # CUDA ライブラリが LD_LIBRARY_PATH にないと音声デコードすらできなくなるバグがある (pytorch/torchcodec#1309)
+    ## torchaudio 2.9 が torchcodec をデフォルトバックエンドとして使うため、torchaudio.save/load に影響する
+    ## 0.9.1 は CUDA 非依存で正常に動作するためこのバージョンに固定する
+    "torchcodec>=0.9.1,<0.10.0",
     # 開発関連ツール
-    # 比較的サイズが小さいため core に含める
+    ## 比較的サイズが小さいため core に含める
     "coverage[toml]>=6.5",
     "pytest",
     "pyright",

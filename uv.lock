@@ -4932,6 +4932,7 @@ core = [
     { name = "taskipy" },
     { name = "torch", version = "2.9.1", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and sys_platform != 'win32')" },
     { name = "torch", version = "2.9.1+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'win32'" },
+    { name = "torchcodec" },
 ]
 full = [
     { name = "accelerate" },
@@ -4993,6 +4994,7 @@ server = [
     { name = "taskipy" },
     { name = "torch", version = "2.9.1", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and sys_platform != 'win32')" },
     { name = "torch", version = "2.9.1+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'win32'" },
+    { name = "torchcodec" },
     { name = "uvicorn" },
 ]
 tools = [
@@ -5015,6 +5017,7 @@ tools = [
     { name = "taskipy" },
     { name = "torch", version = "2.9.1", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and sys_platform != 'win32')" },
     { name = "torch", version = "2.9.1+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'win32'" },
+    { name = "torchcodec" },
 ]
 train = [
     { name = "accelerate" },
@@ -5061,6 +5064,7 @@ webui = [
     { name = "taskipy" },
     { name = "torch", version = "2.9.1", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and sys_platform != 'win32')" },
     { name = "torch", version = "2.9.1+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'win32'" },
+    { name = "torchcodec" },
     { name = "umap-learn" },
 ]
 
@@ -5108,6 +5112,7 @@ core = [
     { name = "taskipy" },
     { name = "torch", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and sys_platform != 'win32')", specifier = ">=2.9.1,<2.10.0" },
     { name = "torch", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'win32'", specifier = ">=2.9.1,<2.10.0", index = "https://download.pytorch.org/whl/cu128" },
+    { name = "torchcodec", specifier = ">=0.9.1,<0.10.0" },
 ]
 full = [
     { name = "accelerate" },
@@ -5167,6 +5172,7 @@ server = [
     { name = "taskipy" },
     { name = "torch", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and sys_platform != 'win32')", specifier = ">=2.9.1,<2.10.0" },
     { name = "torch", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'win32'", specifier = ">=2.9.1,<2.10.0", index = "https://download.pytorch.org/whl/cu128" },
+    { name = "torchcodec", specifier = ">=0.9.1,<0.10.0" },
     { name = "uvicorn" },
 ]
 tools = [
@@ -5188,6 +5194,7 @@ tools = [
     { name = "taskipy" },
     { name = "torch", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and sys_platform != 'win32')", specifier = ">=2.9.1,<2.10.0" },
     { name = "torch", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'win32'", specifier = ">=2.9.1,<2.10.0", index = "https://download.pytorch.org/whl/cu128" },
+    { name = "torchcodec", specifier = ">=0.9.1,<0.10.0" },
 ]
 train = [
     { name = "accelerate" },
@@ -5232,6 +5239,7 @@ webui = [
     { name = "taskipy" },
     { name = "torch", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and sys_platform != 'win32')", specifier = ">=2.9.1,<2.10.0" },
     { name = "torch", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'win32'", specifier = ">=2.9.1,<2.10.0", index = "https://download.pytorch.org/whl/cu128" },
+    { name = "torchcodec", specifier = ">=0.9.1,<0.10.0" },
     { name = "umap-learn" },
 ]
 
