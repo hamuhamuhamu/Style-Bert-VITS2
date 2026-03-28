@@ -510,6 +510,7 @@ def _plot_cluster_histogram(
     try:
         import matplotlib
         import matplotlib.pyplot as plt
+        import matplotlib_fontja  # pyright: ignore[reportUnusedImport]
     except ImportError:
         logger.warning("matplotlib is not available. Skipping plot output.")
         return
@@ -553,6 +554,7 @@ def _plot_cluster_scatter_tsne(
     try:
         import matplotlib
         import matplotlib.pyplot as plt
+        import matplotlib_fontja  # pyright: ignore[reportUnusedImport]
         from sklearn.manifold import TSNE
     except ImportError:
         logger.warning("matplotlib or sklearn is not available. Skipping plot output.")

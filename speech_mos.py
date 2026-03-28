@@ -7,6 +7,7 @@ import warnings
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import matplotlib_fontja  # pyright: ignore[reportUnusedImport]
 import numpy as np
 import pandas as pd
 import torch

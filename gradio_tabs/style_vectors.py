@@ -10,6 +10,7 @@ from typing import Any
 
 import gradio as gr
 import matplotlib.pyplot as plt
+import matplotlib_fontja  # pyright: ignore[reportUnusedImport]
 import numpy as np
 import torch
 from numpy.typing import NDArray

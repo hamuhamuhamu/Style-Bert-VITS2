@@ -94,6 +94,7 @@ def plot_spectrogram_to_numpy(spectrogram: NDArray[Any]) -> NDArray[Any]:
         mpl_logger = logging.getLogger("matplotlib")
         mpl_logger.setLevel(logging.WARNING)
     import matplotlib.pylab as plt
+    import matplotlib_fontja  # pyright: ignore[reportUnusedImport]
 
     fig, ax = plt.subplots(figsize=(10, 2))
     im = ax.imshow(spectrogram, aspect="auto", origin="lower", interpolation="none")
@@ -132,6 +133,7 @@ def plot_alignment_to_numpy(
         mpl_logger = logging.getLogger("matplotlib")
         mpl_logger.setLevel(logging.WARNING)
     import matplotlib.pylab as plt
+    import matplotlib_fontja  # pyright: ignore[reportUnusedImport]
 
     fig, ax = plt.subplots(figsize=(6, 4))
     im = ax.imshow(
