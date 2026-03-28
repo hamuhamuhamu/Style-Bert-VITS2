@@ -39,7 +39,7 @@ dist/
 safetensors.ipynb
 *.wav
 /static/
-/roadmap/
+/research/
 
 # pyopenjtalk's dictionary
 *.dic
