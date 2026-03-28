@@ -1065,7 +1065,7 @@ class SynthesizerTrn(nn.Module):
             "speaker_adapter_input_dim", gin_channels
         )
         self.speaker_adapter_bottleneck_dim = kwargs.get(
-            "speaker_adapter_bottleneck_dim", 48
+            "speaker_adapter_bottleneck_dim", 96
         )
         self.use_sdp = use_sdp
         self.use_noise_scaled_mas = kwargs.get("use_noise_scaled_mas", False)

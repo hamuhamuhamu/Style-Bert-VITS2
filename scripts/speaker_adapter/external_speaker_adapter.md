@@ -21,7 +21,7 @@ speaker_embedding (.spk.npy, 192 dim)
 
 - 入力は anime-speaker-embedding 由来の 192 次元 speaker embedding
 - 役割は、話者性制御に必要な情報を低次元の control subspace `ctrl` に圧縮すること
-- 既定では `speaker_adapter_bottleneck_dim = 48`
+- 既定では `speaker_adapter_bottleneck_dim = 96`
 
 ### SpeakerAdapter
 

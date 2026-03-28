@@ -102,7 +102,7 @@ class HyperParametersModel(BaseModel):
     gin_channels: int = 512
     use_speaker_adapter: bool = False
     speaker_adapter_input_dim: int = 384
-    speaker_adapter_bottleneck_dim: int = 48
+    speaker_adapter_bottleneck_dim: int = 96
     slm: HyperParametersModelSLM = HyperParametersModelSLM()
 
 
