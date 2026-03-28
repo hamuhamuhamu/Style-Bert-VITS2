@@ -103,34 +103,85 @@ class TextAudioSpeakerLoader(Dataset[tuple[Any, ...]]):
         audiopaths_sid_text_new = []
         lengths = []
         skipped = 0
+        not_found = 0
+        sr_mismatch = 0
+        spk_unknown = 0
         logger.info("Init dataset...")
-        for _id, spk, language, text, phones, tone, word2ph in tqdm(
-            self.audiopaths_sid_text, file=sys.stdout, dynamic_ncols=True
+        for line_index, fields in enumerate(
+            tqdm(self.audiopaths_sid_text, file=sys.stdout, dynamic_ncols=True)
         ):
+            # train.list は 7 カラム (id|spk|language|text|phones|tone|word2ph) を期待する
+            if len(fields) != 7:
+                logger.warning(
+                    f"Skipping malformed line {line_index}: "
+                    f"expected 7 fields, got {len(fields)}"
+                )
+                skipped += 1
+                continue
+            _id, spk, language, text, phones, tone, word2ph = fields
+
             # _id は wavs_dir からの相対パスなので、フルパスを構築
-            audiopath = str(self.wavs_dir / _id)
-            # if self.min_text_len <= len(phones) and len(phones) <= self.max_text_len:
+            audiopath_path = self.wavs_dir / _id
+            audiopath = str(audiopath_path)
+            audiopath_lower = audiopath.lower()
+
+            # ファイル存在チェック
+            if not audiopath_path.exists():
+                logger.warning(f"Audio file not found, skipping: {audiopath}")
+                not_found += 1
+                skipped += 1
+                continue
+
+            # 話者 ID が spk2id に存在するか確認
+            if spk not in self.spk_map:
+                logger.warning(
+                    f"Unknown speaker '{spk}' not in spk2id, skipping: {audiopath}"
+                )
+                spk_unknown += 1
+                skipped += 1
+                continue
+
             phones = phones.split(" ")
             tone = [int(i) for i in tone.split(" ")]
             word2ph = [int(i) for i in word2ph.split(" ")]
+            # サンプルレートの事前チェック
+            ## get_audio() でも検証されるが、ここで早期に検出してスキップする方が
+            ## 学習開始後にバッチの途中でクラッシュするより遥かにデバッグしやすい
+            audio_info = sf.info(audiopath)
+            if audio_info.samplerate != self.sampling_rate:
+                logger.warning(
+                    f"Sample rate mismatch, skipping: {audiopath} "
+                    f"(expected: {self.sampling_rate}, "
+                    f"got: {audio_info.samplerate})"
+                )
+                sr_mismatch += 1
+                skipped += 1
+                continue
+
             audiopaths_sid_text_new.append(
                 [audiopath, spk, language, text, phones, tone, word2ph]
             )
-            # WAV は既存データとの bucket 互換性を維持するため、従来どおりファイルサイズで推定する
-            if Path(audiopath).suffix.lower() == ".wav":
+            # WAV (16-bit PCM mono) はファイルサイズから spec 長を高速に推定する
+            # これは従来の SBV2 と同一の挙動であり、既存 WAV データセットとの互換性を維持する
+            if audiopath_lower.endswith(".wav"):
                 lengths.append(os.path.getsize(audiopath) // (2 * self.hop_length))
             else:
-                # 非 WAV は soundfile.info() でヘッダから実際のフレーム数を取得する
-                ## OGG Vorbis / FLAC 等はファイルサイズとサンプル数が比例しないため
-                audio_info = sf.info(audiopath)
+                # 非 WAV (OGG Vorbis / FLAC 等) は soundfile.info() でヘッダから
+                # 実際のフレーム数を取得する
+                ## 圧縮形式ではファイルサイズとサンプル数が比例しないためヒューリスティックでは取得できない
+                ## sf.info() はファイルヘッダのみ読むため十分高速
                 lengths.append(audio_info.frames // self.hop_length)
-            # else:
-            #     skipped += 1
+        if not_found > 0:
+            logger.warning(f"Audio files not found: {not_found}")
+        if sr_mismatch > 0:
+            logger.warning(f"Sample rate mismatches: {sr_mismatch}")
+        if spk_unknown > 0:
+            logger.warning(f"Unknown speakers: {spk_unknown}")
         logger.info(
-            "skipped: "
-            + str(skipped)
-            + ", total: "
-            + str(len(self.audiopaths_sid_text))
+            f"Dataset initialized. "
+            f"total: {len(self.audiopaths_sid_text)}, "
+            f"valid: {len(audiopaths_sid_text_new)}, "
+            f"skipped: {skipped}"
         )
         self.audiopaths_sid_text = audiopaths_sid_text_new
         self.lengths = lengths
