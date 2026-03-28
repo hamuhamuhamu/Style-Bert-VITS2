@@ -126,7 +126,10 @@ def main() -> None:
         raise ValueError("Speaker control encoder and adapter are not initialized.")
     with output_meta.open("w", encoding="utf-8") as meta_file, torch.inference_mode():
         for idx, entry in enumerate(entries):
-            embedding = _load_speaker_embedding(entry["audio_path"])
+            audio_path = Path(entry["audio_path"])
+            if audio_path.is_absolute() is False:
+                audio_path = paths.wavs_dir / audio_path
+            embedding = _load_speaker_embedding(str(audio_path))
             embedding_tensor = torch.from_numpy(embedding).float().to(args.device)
             if embedding_tensor.dim() == 1:
                 embedding_tensor = embedding_tensor.unsqueeze(0)

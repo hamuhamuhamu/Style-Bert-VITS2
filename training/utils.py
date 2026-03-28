@@ -11,8 +11,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+import soundfile as sf
 import torch
 from numpy.typing import NDArray
+from scipy.io.wavfile import read
 
 from style_bert_vits2.logging import logger
 
@@ -156,7 +158,12 @@ def plot_alignment_to_numpy(
 
 def load_wav_to_torch(full_path: str | Path) -> tuple[torch.FloatTensor, int]:
     """
-    指定された音声ファイルを読み込み、PyTorch のテンソルに変換して返す
+    指定された音声ファイルを読み込み、PyTorch のテンソルに変換して返す。
+
+    既存の WAV 学習データとの互換性を維持するため、`.wav` / `.WAV` は従来どおり
+    `scipy.io.wavfile.read()` で raw PCM スケールのまま読み込む。
+    それ以外の形式は `soundfile` で float32 にデコードして返す。
+    呼び出し側では、値域を見て追加の正規化が必要かどうかを判定する。
 
     Args:
         full_path (str | Path): 音声ファイルのパス
@@ -165,15 +172,25 @@ def load_wav_to_torch(full_path: str | Path) -> tuple[torch.FloatTensor, int]:
         tuple[torch.FloatTensor, int]: 音声データのテンソルとサンプリングレート
     """
 
-    # この関数は学習時以外使われないため、ライブラリとしての style_bert_vits2 が
-    # 重たい scipy に依存しないように遅延 import する
-    try:
-        from scipy.io.wavfile import read
-    except ImportError:
-        raise ImportError("scipy is required to load wav file")
+    full_path_obj = Path(full_path)
 
-    sampling_rate, data = read(full_path)
-    return torch.FloatTensor(data.astype(np.float32)), sampling_rate
+    # WAV は従来どおり raw PCM スケールで読み込み、既存学習データとの互換性を維持する
+    if full_path_obj.suffix.lower() == ".wav":
+        sampling_rate, data = read(full_path_obj)
+        audio = np.asarray(data, dtype=np.float32)
+    else:
+        # 非 WAV は soundfile でデコードし、OGG Vorbis / FLAC 等に対応する
+        ## soundfile は float32 [-1, 1] を返すため、呼び出し側で追加正規化は原則不要
+        data, sampling_rate = sf.read(full_path_obj, dtype="float32")
+        audio = np.asarray(data, dtype=np.float32)
+
+    # マルチチャンネル音声を黙って通すと学習データが壊れるため、明示的にエラーにする
+    if audio.ndim > 1:
+        raise ValueError(
+            f"Multi-channel audio is not supported (expected mono). "
+            f"channels: {audio.shape[1]}, file: {full_path}"
+        )
+    return torch.FloatTensor(audio), sampling_rate
 
 
 def load_filepaths_and_text(filename: str | Path, split: str = "|") -> list[list[str]]:

@@ -49,12 +49,13 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def get_audio_paths(list_path: Path) -> list[str]:
+def get_audio_paths(list_path: Path, wavs_dir: Path) -> list[str]:
     """
     list ファイルから音声パスを取得する。
 
     Args:
         list_path (Path): list ファイルのパス
+        wavs_dir (Path): wavs ディレクトリのパス
 
     Returns:
         list[str]: 音声ファイルのパス
@@ -69,7 +70,10 @@ def get_audio_paths(list_path: Path) -> list[str]:
     for fields in entries:
         if len(fields) < 1:
             continue
-        audio_paths.append(fields[0])
+        audio_path = Path(fields[0])
+        if audio_path.is_absolute() is False:
+            audio_path = wavs_dir / audio_path
+        audio_paths.append(str(audio_path))
     return audio_paths
 
 
@@ -107,8 +111,8 @@ def main() -> None:
 
     # train.list と val.list から音声パスを取得し、重複を除去する
     audio_paths_raw: list[str] = []
-    audio_paths_raw.extend(get_audio_paths(paths.train_list_path))
-    audio_paths_raw.extend(get_audio_paths(paths.val_list_path))
+    audio_paths_raw.extend(get_audio_paths(paths.train_list_path, paths.wavs_dir))
+    audio_paths_raw.extend(get_audio_paths(paths.val_list_path, paths.wavs_dir))
     audio_paths = list(dict.fromkeys(audio_paths_raw))
 
     if len(audio_paths) == 0:

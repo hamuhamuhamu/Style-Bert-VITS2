@@ -48,5 +48,7 @@ safetensors.ipynb
 playground.ipynb
 playgrounds/
 
+.codex
+
 # Serena
 .serena/cache/

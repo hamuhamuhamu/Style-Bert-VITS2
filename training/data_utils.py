@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import soundfile as sf
 import torch
 from torch.utils.data import Dataset
 from torch.utils.data.distributed import DistributedSampler
@@ -95,6 +96,9 @@ class TextAudioSpeakerLoader(Dataset[tuple[Any, ...]]):
         # Store spectrogram lengths for Bucketing
         # wav_length ~= file_size / (wav_channels * Bytes per dim) = file_size / (1 * 2)
         # spec_length = wav_length // hop_length
+        # NOTE: OGG Vorbis 等の圧縮形式ではファイルサイズから spec 長を推定できないため、
+        # WAV は従来どおりファイルサイズヒューリスティックを維持し、
+        # それ以外は soundfile で実際のフレーム数を取得する
 
         audiopaths_sid_text_new = []
         lengths = []
@@ -112,7 +116,14 @@ class TextAudioSpeakerLoader(Dataset[tuple[Any, ...]]):
             audiopaths_sid_text_new.append(
                 [audiopath, spk, language, text, phones, tone, word2ph]
             )
-            lengths.append(os.path.getsize(audiopath) // (2 * self.hop_length))
+            # WAV は既存データとの bucket 互換性を維持するため、従来どおりファイルサイズで推定する
+            if Path(audiopath).suffix.lower() == ".wav":
+                lengths.append(os.path.getsize(audiopath) // (2 * self.hop_length))
+            else:
+                # 非 WAV は soundfile.info() でヘッダから実際のフレーム数を取得する
+                ## OGG Vorbis / FLAC 等はファイルサイズとサンプル数が比例しないため
+                audio_info = sf.info(audiopath)
+                lengths.append(audio_info.frames // self.hop_length)
             # else:
             #     skipped += 1
         logger.info(
@@ -272,11 +283,27 @@ class TextAudioSpeakerLoader(Dataset[tuple[Any, ...]]):
             raise ValueError(
                 f"{filename} {sampling_rate} SR doesn't match target {self.sampling_rate} SR"
             )
-        audio_norm = audio / self.max_wav_value
+        # soundfile (OGG/FLAC) は float32 [-1, 1] を返すため正規化不要
+        # WAV は scipy.io.wavfile で int16 raw スケール (max ~32768) を返すため max_wav_value で割る
+        audio_max = audio.abs().max()
+        if audio_max <= 1.0:
+            # 既に [-1, 1] に正規化されている (soundfile 経由)
+            audio_norm = audio
+        elif audio_max <= self.max_wav_value * 1.1:
+            # int16 raw スケール (scipy 経由の WAV)
+            audio_norm = audio / self.max_wav_value
+        else:
+            # 想定外の値域 — 24-bit や 32-bit の raw データが混入している可能性がある
+            raise ValueError(
+                f"Unexpected audio value range. max: {audio_max:.1f}, "
+                f"expected: <= 1.0 (float32) or <= {self.max_wav_value} (int16). "
+                f"file: {filename}"
+            )
         audio_norm = audio_norm.unsqueeze(0)
-        spec_filename = filename.replace(".wav", ".spec.pt")
         if self.use_mel_spec_posterior:
-            spec_filename = spec_filename.replace(".spec.pt", ".mel.pt")
+            spec_filename = str(Path(filename).with_suffix(".mel.pt"))
+        else:
+            spec_filename = str(Path(filename).with_suffix(".spec.pt"))
         try:
             spec = torch.load(spec_filename)
         except Exception:
@@ -362,7 +389,7 @@ class TextAudioSpeakerLoader(Dataset[tuple[Any, ...]]):
             for i in range(len(word2ph)):
                 word2ph[i] = word2ph[i] * 2
             word2ph[0] += 1
-        bert_path = wav_path.replace(".wav", ".bert.pt")
+        bert_path = str(Path(wav_path).with_suffix(".bert.pt"))
         try:
             # DataLoader 上で BERT 特徴量を CPU テンソルとして扱うことで、multiprocessing ワーカー上で CUDA の再初期化が試みられて
             # "Cannot re-initialize CUDA in forked subprocess" エラーが発生する問題を回避する

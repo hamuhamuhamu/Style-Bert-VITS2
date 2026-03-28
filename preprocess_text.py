@@ -105,10 +105,10 @@ def process_line(
         # パス文字列を正規化してから処理
         utt_posix = utt_path.as_posix()
         if "/wavs/" in utt_posix:
-            # Data/model_name/wavs/file.wav 形式の場合、wavs/ 以降を取得
+            # Data/model_name/wavs/file.ogg 形式などの場合、wavs/ 以降を取得
             normalized_utt_path = Path(utt_posix.split("/wavs/", 1)[1])
         elif utt_posix.startswith("wavs/"):
-            # wavs/file.wav 形式の場合、wavs/ プレフィックスを除去
+            # wavs/file.ogg 形式などの場合、wavs/ プレフィックスを除去
             normalized_utt_path = Path(utt_posix[5:])  # "wavs/" は 5 文字
         else:
             # 既に wavs/ からの相対パスの場合はそのまま使用

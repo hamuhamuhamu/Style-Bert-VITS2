@@ -79,8 +79,8 @@ def process_line(
             word2ph[i] = word2ph[i] * 2
         word2ph[0] += 1
 
-    # wav_path は wavs_dir からの相対パスなので、フルパスを構築
-    bert_relative_path = wav_path.replace(".WAV", ".wav").replace(".wav", ".bert.pt")
+    # wav_path は wavs_dir からの相対パスなので、拡張子非依存で派生パスを構築
+    bert_relative_path = Path(wav_path).with_suffix(".bert.pt")
     bert_path = wavs_dir / bert_relative_path
 
     try:

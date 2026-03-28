@@ -88,6 +88,7 @@ def _warn_missing(
 
 def _check_entries(
     entries: list[list[str]],
+    wavs_dir: Path,
     use_speaker_embedding: bool,
     max_errors: int,
 ) -> tuple[set[str], int]:
@@ -96,6 +97,7 @@ def _check_entries(
 
     Args:
         entries (list[list[str]]): list エントリ
+        wavs_dir (Path): wavs ディレクトリのパス
         use_speaker_embedding (bool): speaker embedding の有無
         max_errors (int): 表示する最大件数
 
@@ -117,19 +119,21 @@ def _check_entries(
         speakers.add(speaker)
 
         audio_path_obj = Path(audio_path)
+        if audio_path_obj.is_absolute() is False:
+            audio_path_obj = wavs_dir / audio_path_obj
         if not audio_path_obj.exists():
-            missing_audio.append(audio_path)
+            missing_audio.append(str(audio_path_obj))
 
-        bert_path = str(Path(audio_path).with_suffix(".bert.pt"))
+        bert_path = str(audio_path_obj.with_suffix(".bert.pt"))
         if not Path(bert_path).exists():
             missing_bert.append(bert_path)
 
-        style_path = f"{audio_path}.npy"
+        style_path = f"{audio_path_obj}.npy"
         if not Path(style_path).exists():
             missing_style.append(style_path)
 
         if use_speaker_embedding:
-            speaker_embedding_path = f"{audio_path}.spk.npy"
+            speaker_embedding_path = f"{audio_path_obj}.spk.npy"
             if not Path(speaker_embedding_path).exists():
                 missing_speaker_embedding.append(speaker_embedding_path)
 
@@ -165,11 +169,13 @@ def main() -> None:
 
     speakers_train, missing_train = _check_entries(
         train_entries,
+        paths.wavs_dir,
         hps.data.use_speaker_embedding,
         args.max_errors,
     )
     speakers_val, missing_val = _check_entries(
         val_entries,
+        paths.wavs_dir,
         hps.data.use_speaker_embedding,
         args.max_errors,
     )
