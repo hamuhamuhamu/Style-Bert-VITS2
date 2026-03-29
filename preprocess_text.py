@@ -71,7 +71,9 @@ def process_line(
     1行のデータを処理し、音素・トーン情報を付与する。
 
     Args:
-        line (str): 処理対象の行（utt|spk|language|text 形式）
+        line (str): 処理対象の行
+            - 4 列: `utt|spk|language|text`
+            - 6 列: `utt|spk|language|text|phones|tones`
         wavs_dir (Path): wavs ディレクトリのパス
         use_jp_extra (bool): JP-Extra モードを使用するかどうか
         yomi_error (str): 読みエラー時の挙動（"raise", "skip", "use"）
@@ -84,13 +86,22 @@ def process_line(
     """
 
     splitted_line = line.strip().split("|")
-    if len(splitted_line) != 4:
+    given_phone: list[str] | None = None
+    given_tone: list[int] | None = None
+    if len(splitted_line) == 4:
+        utt, spk, language, text = splitted_line
+    elif len(splitted_line) == 6:
+        utt, spk, language, text, given_phone_string, given_tone_string = splitted_line
+        given_phone = given_phone_string.split()
+        given_tone = [int(tone) for tone in given_tone_string.split()]
+    else:
         raise ValueError(f"Invalid line format: {line.strip()}")
-    utt, spk, language, text = splitted_line
 
     norm_text, phones, tones, word2ph, _, _, _ = clean_text_with_given_phone_tone(
         text=text,
         language=language,  # type: ignore
+        given_phone=given_phone,
+        given_tone=given_tone,
         use_jp_extra=use_jp_extra,
         raise_yomi_error=(yomi_error != "use"),
     )
