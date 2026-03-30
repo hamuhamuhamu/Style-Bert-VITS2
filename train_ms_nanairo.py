@@ -65,7 +65,7 @@ from style_bert_vits2.models.models_nanairo import (
     SynthesizerTrn,
     WavLMDiscriminator,
 )
-from style_bert_vits2.nlp.symbols import SYMBOLS
+from style_bert_vits2.nlp.symbols import NANAIRO_SYMBOLS
 from style_bert_vits2.utils.paths import (
     TrainingModelPaths,
     add_model_argument,
@@ -440,8 +440,16 @@ def run():
     else:
         logger.info("Using normal encoder for VITS1")
 
+    # Nanairo 専用の学習スクリプトなので、config 側の use_nanairo フラグが有効でない場合にはエラーとする
+    # さもなければ、NLP パイプラインが通常モード（絵文字モーラを削除する）で動作し、語彙数と不整合を起こして学習が破綻しうる
+    if hps.is_nanairo_like_model() is not True:
+        raise RuntimeError(
+            "train_ms_nanairo.py requires data.use_nanairo=true in config. "
+            "Check your config.json or use train_ms_jp_extra.py for non-Nanairo models."
+        )
+
     net_g = SynthesizerTrn(
-        len(SYMBOLS),
+        len(NANAIRO_SYMBOLS),
         hps.data.filter_length // 2 + 1,
         hps.train.segment_size // hps.data.hop_length,
         n_speakers=hps.data.n_speakers,
@@ -646,7 +654,9 @@ def run():
     else:
         try:
             _ = utils.safetensors.load_safetensors(
-                os.path.join(pretrained_model_dir, "G_0.safetensors"), net_g
+                os.path.join(pretrained_model_dir, "G_0.safetensors"),
+                net_g,
+                allow_partial_load_embedding_keys=("enc_p.emb.weight",),
             )
             _ = utils.safetensors.load_safetensors(
                 os.path.join(pretrained_model_dir, "D_0.safetensors"), net_d

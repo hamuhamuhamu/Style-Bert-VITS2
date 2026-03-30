@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+
 # Punctuations
 PUNCTUATIONS = ["!", "?", "…", ",", ".", "'", "-"]
 
@@ -6,6 +9,58 @@ PUNCTUATION_SYMBOLS = PUNCTUATIONS + ["SP", "UNK"]
 
 # Padding
 PAD = "_"
+
+# Nanairo 専用の絵文字モーラを列挙
+## すでに学習済みの non-JP-Extra / JP-Extra 系モデルとの語彙 ID の互換性を維持するため、
+## 通常の SYMBOLS には追加せず、Nanairo 専用の追加モーラとして SYMBOLS の末尾に追加し、Nanairo 互換モデルでのみ用いる
+## 含まれるのは日本語 BERT のトークナイザできちんと1文字として分割される（複数コードポイントに分割されない）絵文字のみ
+NANAIRO_EMOJI_SYMBOLS = [
+    "⏩",
+    "⏸",
+    "🌬",
+    "🎵",
+    "🐢",
+    "👂",
+    "👅",
+    "👌",
+    "💋",
+    "📞",
+    "📢",
+    "😆",
+    "😊",
+    "😌",
+    "😏",
+    "😒",
+    "😖",
+    "😟",
+    "😠",
+    "😪",
+    "😭",
+    "😮",
+    "💨",
+    "😰",
+    "😱",
+    "😲",
+    "🙄",
+    "🙏",
+    "🤐",
+    "🤔",
+    "🤧",
+    "🤭",
+    "🥤",
+    "🥱",
+    "🥴",
+    "🥵",
+    "🥺",
+    "🫣",
+    "🫶",
+]
+NANAIRO_EMOJI_SYMBOL_SET = set(NANAIRO_EMOJI_SYMBOLS)
+_NANAIRO_EMOJI_SYMBOLS_SORTED = sorted(
+    NANAIRO_EMOJI_SYMBOLS,
+    key=len,
+    reverse=True,
+)
 
 # Chinese symbols
 ZH_SYMBOLS = [
@@ -172,7 +227,7 @@ NUM_EN_TONES = 4
 # Combine all symbols
 NORMAL_SYMBOLS = sorted(set(ZH_SYMBOLS + JP_SYMBOLS + EN_SYMBOLS))
 SYMBOLS = [PAD] + NORMAL_SYMBOLS + PUNCTUATION_SYMBOLS
-SIL_PHONEMES_IDS = [SYMBOLS.index(i) for i in PUNCTUATION_SYMBOLS]
+NANAIRO_SYMBOLS = SYMBOLS + NANAIRO_EMOJI_SYMBOLS
 
 # Combine all tones
 NUM_TONES = NUM_ZH_TONES + NUM_JP_TONES + NUM_EN_TONES
@@ -187,6 +242,88 @@ LANGUAGE_TONE_START_MAP = {
     "JP": NUM_ZH_TONES,
     "EN": NUM_ZH_TONES + NUM_JP_TONES,
 }
+
+
+def is_nanairo_emoji_symbol(symbol: str) -> bool:
+    """
+    `symbol` が、Nanairo 専用の絵文字モーラ 1 件と完全一致するかを返す。
+
+    Args:
+        symbol (str): 1 セグメント（通常は `split_text_by_nanairo_emoji_symbols` の要素）として判定する文字列
+
+    Returns:
+        bool: `NANAIRO_EMOJI_SYMBOLS` のいずれかと一致すれば True、それ以外は False
+    """
+
+    return symbol in NANAIRO_EMOJI_SYMBOL_SET
+
+
+def contains_nanairo_emoji_symbols(text: str) -> bool:
+    """
+    `text` のどこかに、Nanairo 専用の絵文字モーラが部分文字列として現れるかを返す。
+
+    Args:
+        text (str): 走査する入力全文
+
+    Returns:
+        bool: いずれかの絵文字モーラが 1 件でも部分一致していれば True
+    """
+
+    return any(emoji_symbol in text for emoji_symbol in NANAIRO_EMOJI_SYMBOLS)
+
+
+def split_text_by_nanairo_emoji_symbols(text: str) -> list[str]:
+    """
+    `text` を左から読み、現在位置が絵文字モーラの先頭ならその絵文字モーラ全体を 1 セグメントに切り出す。
+    そうでなければ `str` の 1 要素（1 Unicode コードポイント）ずつ読み、連続した非絵文字は 1 セグメントにまとめる。
+    絵文字モーラは長い定義から順に照合し、短い絵文字モーラだけが先にマッチして壊れることを防ぐ。
+
+    Args:
+        text (str): 分割する入力全文
+
+    Returns:
+        list[str]: 先頭から順のセグメント列。各要素は「絵文字モーラ 1 件」または「それ以外の文字の連なり」のどちらか
+    """
+
+    segments: list[str] = []
+    current_chunk: list[str] = []
+    current_index = 0
+    while current_index < len(text):
+        matched_emoji_symbol: str | None = None
+        for emoji_symbol in _NANAIRO_EMOJI_SYMBOLS_SORTED:
+            if text.startswith(emoji_symbol, current_index):
+                matched_emoji_symbol = emoji_symbol
+                break
+        if matched_emoji_symbol is not None:
+            if current_chunk:
+                segments.append("".join(current_chunk))
+                current_chunk = []
+            segments.append(matched_emoji_symbol)
+            current_index += len(matched_emoji_symbol)
+            continue
+        current_chunk.append(text[current_index])
+        current_index += 1
+    if current_chunk:
+        segments.append("".join(current_chunk))
+    return segments
+
+
+def strip_nanairo_emoji_symbols(text: str) -> str:
+    """
+    `split_text_by_nanairo_emoji_symbols` と同じ規則で、`NANAIRO_EMOJI_SYMBOLS` に属するセグメントだけを取り除き、残りを連結する。
+
+    Args:
+        text (str): Nanairo 専用の絵文字モーラを削除したい入力全文
+
+    Returns:
+        str: Nanairo 専用の絵文字モーラを除いたあとの文字列
+    """
+
+    return "".join(
+        segment
+        for segment in split_text_by_nanairo_emoji_symbols(text)
+        if is_nanairo_emoji_symbol(segment) is False
+    )
 
 
 if __name__ == "__main__":

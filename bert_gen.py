@@ -36,16 +36,17 @@ update_dict()
 
 
 def process_line(
-    x: tuple[str, bool, str, bool, Path],
+    x: tuple[str, bool, bool, str, bool, Path],
 ) -> None:
     """
     1行のデータを処理し、BERT 特徴量を生成する。
 
     Args:
-        x (tuple[str, bool, str, bool, Path]): (行データ, add_blank フラグ, デバイス, マルチデバイス使用フラグ, wavs_dir) のタプル
+        x (tuple[str, bool, bool, str, bool, Path]):
+            (行データ, add_blank フラグ, use_nanairo フラグ, デバイス, マルチデバイス使用フラグ, wavs_dir) のタプル
     """
 
-    line, add_blank, device, use_multi_device, wavs_dir = x
+    line, add_blank, use_nanairo, device, use_multi_device, wavs_dir = x
 
     if use_multi_device:
         rank = mp.current_process()._identity
@@ -68,7 +69,10 @@ def process_line(
         phone, tone, word2ph, Languages[language_str]
     )
     phone, tone, language = cleaned_text_to_sequence(
-        phone, tone, Languages[language_str]
+        phone,
+        tone,
+        Languages[language_str],
+        use_nanairo=use_nanairo,
     )
 
     if add_blank:
@@ -87,7 +91,13 @@ def process_line(
         bert = torch.load(bert_path)
         assert bert.shape[-1] == len(phone)
     except Exception:
-        bert = extract_bert_feature(text, word2ph, Languages(language_str), device)
+        bert = extract_bert_feature(
+            text,
+            word2ph,
+            Languages(language_str),
+            device,
+            use_nanairo=use_nanairo,
+        )
         assert bert.shape[-1] == len(phone)
         torch.save(bert, bert_path)
 
@@ -136,6 +146,7 @@ if __name__ == "__main__":
         lines.extend(f.readlines())
 
     add_blank = hps.data.add_blank
+    use_nanairo = hps.is_nanairo_like_model()
     device: str = args.device
     use_multi_device: bool = args.use_multi_device
     num_processes: int = args.num_processes
@@ -155,7 +166,14 @@ if __name__ == "__main__":
                     executor.map(
                         process_line,
                         [
-                            (line, add_blank, device, use_multi_device, wavs_dir)
+                            (
+                                line,
+                                add_blank,
+                                use_nanairo,
+                                device,
+                                use_multi_device,
+                                wavs_dir,
+                            )
                             for line in lines
                         ],
                     ),

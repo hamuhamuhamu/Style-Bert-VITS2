@@ -10,7 +10,12 @@ from style_bert_vits2.constants import Languages
 from style_bert_vits2.nlp.symbols import (
     LANGUAGE_ID_MAP,
     LANGUAGE_TONE_START_MAP,
+    NANAIRO_SYMBOLS,
     SYMBOLS,
+    contains_nanairo_emoji_symbols,
+    is_nanairo_emoji_symbol,
+    split_text_by_nanairo_emoji_symbols,
+    strip_nanairo_emoji_symbols,
 )
 
 
@@ -21,6 +26,7 @@ if TYPE_CHECKING:
 
 
 __symbol_to_id = {s: i for i, s in enumerate(SYMBOLS)}
+__nanairo_symbol_to_id = {s: i for i, s in enumerate(NANAIRO_SYMBOLS)}
 
 
 def extract_bert_feature(
@@ -28,9 +34,11 @@ def extract_bert_feature(
     word2ph: list[int],
     language: Languages,
     device: str,
+    *,
     assist_text: str | None = None,
     assist_text_weight: float = 0.7,
     sep_text: list[str] | None = None,
+    use_nanairo: bool = False,
 ) -> torch.Tensor:
     """
     テキストから BERT の特徴量を抽出する (PyTorch 推論)
@@ -43,6 +51,7 @@ def extract_bert_feature(
         assist_text (str | None, optional): 補助テキスト (デフォルト: None)
         assist_text_weight (float, optional): 補助テキストの重み (デフォルト: 0.7)
         sep_text (list[str] | None, optional): 単語単位の単語のリスト (デフォルト: None)
+        use_nanairo (bool, optional): Nanairo 専用の絵文字モーラを保持するかどうか。Defaults to False.
 
     Returns:
         torch.Tensor: BERT の特徴量
@@ -52,32 +61,33 @@ def extract_bert_feature(
         from style_bert_vits2.nlp.japanese.bert_feature import extract_bert_feature
 
         return extract_bert_feature(
-            text,
-            word2ph,
-            device,
-            assist_text,
-            assist_text_weight,
-            sep_text,  # 日本語のみ sep_text を指定する
+            text=text,
+            word2ph=word2ph,
+            device=device,
+            assist_text=assist_text,
+            assist_text_weight=assist_text_weight,
+            sep_text=sep_text,  # 日本語のみ sep_text を指定する
+            use_nanairo=use_nanairo,  # Nanairo 専用の絵文字モーラを BERT に渡すかどうか
         )
     elif language == Languages.EN:
         from style_bert_vits2.nlp.english.bert_feature import extract_bert_feature
 
         return extract_bert_feature(
-            text,
-            word2ph,
-            device,
-            assist_text,
-            assist_text_weight,
+            text=text,
+            word2ph=word2ph,
+            device=device,
+            assist_text=assist_text,
+            assist_text_weight=assist_text_weight,
         )
     elif language == Languages.ZH:
         from style_bert_vits2.nlp.chinese.bert_feature import extract_bert_feature
 
         return extract_bert_feature(
-            text,
-            word2ph,
-            device,
-            assist_text,
-            assist_text_weight,
+            text=text,
+            word2ph=word2ph,
+            device=device,
+            assist_text=assist_text,
+            assist_text_weight=assist_text_weight,
         )
     else:
         raise ValueError(f"Language {language} not supported")
@@ -88,9 +98,11 @@ def extract_bert_feature_onnx(
     word2ph: list[int],
     language: Languages,
     onnx_providers: Sequence[str | tuple[str, dict[str, Any]]],
+    *,
     assist_text: str | None = None,
     assist_text_weight: float = 0.7,
     sep_text: list[str] | None = None,
+    use_nanairo: bool = False,
 ) -> NDArray[Any]:
     """
     テキストから BERT の特徴量を抽出する (ONNX 推論)
@@ -103,6 +115,7 @@ def extract_bert_feature_onnx(
         assist_text (str | None, optional): 補助テキスト (デフォルト: None)
         assist_text_weight (float, optional): 補助テキストの重み (デフォルト: 0.7)
         sep_text (list[str] | None, optional): 単語単位の単語のリスト (デフォルト: None)
+        use_nanairo (bool, optional): Nanairo 専用の絵文字モーラを保持するかどうか。Defaults to False.
 
     Returns:
         NDArray[Any]: BERT の特徴量
@@ -112,32 +125,33 @@ def extract_bert_feature_onnx(
         from style_bert_vits2.nlp.japanese.bert_feature import extract_bert_feature_onnx
 
         return extract_bert_feature_onnx(
-            text,
-            word2ph,
-            onnx_providers,
-            assist_text,
-            assist_text_weight,
-            sep_text,  # 日本語のみ sep_text を指定する
+            text=text,
+            word2ph=word2ph,
+            onnx_providers=onnx_providers,
+            assist_text=assist_text,
+            assist_text_weight=assist_text_weight,
+            sep_text=sep_text,  # 日本語のみ sep_text を指定する
+            use_nanairo=use_nanairo,  # Nanairo 専用の絵文字モーラを BERT に渡すかどうか
         )
     elif language == Languages.EN:
         from style_bert_vits2.nlp.english.bert_feature import extract_bert_feature_onnx
 
         return extract_bert_feature_onnx(
-            text,
-            word2ph,
-            onnx_providers,
-            assist_text,
-            assist_text_weight,
+            text=text,
+            word2ph=word2ph,
+            onnx_providers=onnx_providers,
+            assist_text=assist_text,
+            assist_text_weight=assist_text_weight,
         )
     elif language == Languages.ZH:
         from style_bert_vits2.nlp.chinese.bert_feature import extract_bert_feature_onnx
 
         return extract_bert_feature_onnx(
-            text,
-            word2ph,
-            onnx_providers,
-            assist_text,
-            assist_text_weight,
+            text=text,
+            word2ph=word2ph,
+            onnx_providers=onnx_providers,
+            assist_text=assist_text,
+            assist_text_weight=assist_text_weight,
         )
     else:
         raise ValueError(f"Language {language} not supported")
@@ -146,7 +160,9 @@ def extract_bert_feature_onnx(
 def _clean_text(
     text: str,
     language: Languages,
+    *,
     use_jp_extra: bool = True,
+    use_nanairo: bool = False,
     raise_yomi_error: bool = False,
     jtalk: OpenJTalk | None = None,
 ) -> tuple[
@@ -186,10 +202,21 @@ def _clean_text(
         from style_bert_vits2.nlp.japanese.g2p import g2p
         from style_bert_vits2.nlp.japanese.normalizer import normalize_text
 
-        norm_text = normalize_text(text)
+        # Nanairo では、絵文字部分のみ正規化対象から除外し、それ以外の部分を通常通り正規化する
+        if use_nanairo is True and contains_nanairo_emoji_symbols(text) is True:
+            normalized_segments: list[str] = []
+            for segment in split_text_by_nanairo_emoji_symbols(text):
+                if is_nanairo_emoji_symbol(segment) is True:
+                    normalized_segments.append(segment)
+                elif segment:
+                    normalized_segments.append(normalize_text(segment))
+            norm_text = "".join(normalized_segments)
+        else:
+            norm_text = normalize_text(text)
         phones, tones, word2ph, sep_text, sep_kata, sep_kata_with_joshi = g2p(
             norm_text,
             use_jp_extra=use_jp_extra,
+            use_nanairo=use_nanairo,
             raise_yomi_error=raise_yomi_error,
             jtalk=jtalk,
         )
@@ -224,9 +251,11 @@ def _clean_text(
 def clean_text_with_given_phone_tone(
     text: str,
     language: Languages,
+    *,
     given_phone: list[str] | None = None,
     given_tone: list[int] | None = None,
     use_jp_extra: bool = True,
+    use_nanairo: bool = False,
     raise_yomi_error: bool = False,
     jtalk: OpenJTalk | None = None,
 ) -> tuple[
@@ -249,6 +278,7 @@ def clean_text_with_given_phone_tone(
         given_phone (list[str] | None, optional): 読み上げテキストの読みを表す音素列。指定する場合は given_tone も別途指定が必要. Defaults to None.
         given_tone (list[int] | None, optional): アクセントのトーンのリスト. Defaults to None.
         use_jp_extra (bool, optional): テキストが日本語の場合に JP-Extra モデルを利用するかどうか。Defaults to True.
+        use_nanairo (bool, optional): Nanairo 専用の絵文字モーラを保持するかどうか。Defaults to False.
         raise_yomi_error (bool, optional): False の場合、読めない文字が消えたような扱いとして処理される。Defaults to False.
         jtalk (OpenJTalk | None, optional): 未指定時は pyopenjtalk モジュール内部で保持されているインスタンスが自動的に利用される。
 
@@ -263,12 +293,38 @@ def clean_text_with_given_phone_tone(
             - 単語単位の単語のカタカナ読みに助詞を追加したリスト
     """
 
+    # Nanairo 非対応モデルでは絵文字モーラを事前に除去して処理を統一する
+    # text / given_phone / given_tone を同じ基準で落とし、従来モデルの挙動互換を維持する
+    if language == Languages.JP and use_nanairo is False:
+        if contains_nanairo_emoji_symbols(text) is True:
+            text = strip_nanairo_emoji_symbols(text)
+        if given_phone is not None and given_tone is not None:
+            # ユーザー指定の phone / tone 長を絵文字除去前に検証
+            ## zip() による暗黙的な切り捨てにより、esd.list 内の音素列・アクセント列 (通常より2列多い6列の行) の整合性が
+            ## 壊れている場合に早めに検知できるよう、先に長さ不整合を検出する
+            if len(given_phone) != len(given_tone):
+                raise InvalidPhoneError(
+                    f"Length of given_phone ({len(given_phone)}) != length of given_tone ({len(given_tone)})"
+                )
+            filtered_pairs = [
+                (phone_symbol, tone_value)
+                for phone_symbol, tone_value in zip(given_phone, given_tone)
+                if is_nanairo_emoji_symbol(phone_symbol) is False
+            ]
+            if filtered_pairs:
+                given_phone = [phone_symbol for phone_symbol, _ in filtered_pairs]
+                given_tone = [tone_value for _, tone_value in filtered_pairs]
+            else:
+                given_phone = None
+                given_tone = None
+
     # 与えられたテキストをクリーニング
     norm_text, phone, tone, word2ph, sep_text, sep_kata, sep_kata_with_joshi = (
         _clean_text(
             text,
             language,
             use_jp_extra=use_jp_extra,
+            use_nanairo=use_nanairo,
             raise_yomi_error=raise_yomi_error,
             jtalk=jtalk,
         )
@@ -402,21 +458,27 @@ def convert_unsupported_phones_for_current_model(
 
 
 def cleaned_text_to_sequence(
-    cleaned_phones: list[str], tones: list[int], language: Languages
+    cleaned_phones: list[str],
+    tones: list[int],
+    language: Languages,
+    *,
+    use_nanairo: bool = False,
 ) -> tuple[list[int], list[int], list[int]]:
     """
-    音素リスト・アクセントリスト・言語を、テキスト内の対応する ID に変換する
+    音素リスト・アクセントリスト・言語を、テキスト内の対応する ID に変換する。
 
     Args:
         cleaned_phones (list[str]): clean_text_with_given_phone_tone() でクリーニングされた音素のリスト
         tones (list[int]): 各音素のアクセント
         language (Languages): テキストの言語
+        use_nanairo (bool, optional): Nanairo 専用の絵文字モーラを使用するかどうか。Defaults to False.
 
     Returns:
-        tuple[list[int], list[int], list[int]]: List of integers corresponding to the symbols in the text
+        tuple[list[int], list[int], list[int]]: 音素 ID・トーン ID・言語 ID のリスト
     """
 
-    phones = [__symbol_to_id[symbol] for symbol in cleaned_phones]
+    symbol_to_id = __nanairo_symbol_to_id if use_nanairo is True else __symbol_to_id
+    phones = [symbol_to_id[symbol] for symbol in cleaned_phones]
     tone_start = LANGUAGE_TONE_START_MAP[language]
     tones = [i + tone_start for i in tones]
     lang_id = LANGUAGE_ID_MAP[language]

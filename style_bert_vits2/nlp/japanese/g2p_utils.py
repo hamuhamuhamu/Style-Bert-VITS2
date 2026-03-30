@@ -4,22 +4,32 @@ from style_bert_vits2.nlp.japanese.mora_list import (
     MORA_KATA_TO_MORA_PHONEMES,
     MORA_PHONEMES_TO_MORA_KATA,
 )
-from style_bert_vits2.nlp.symbols import PUNCTUATIONS
+from style_bert_vits2.nlp.symbols import PUNCTUATIONS, is_nanairo_emoji_symbol
 
 
-def g2kata_tone(norm_text: str) -> list[tuple[str, int]]:
+def g2kata_tone(
+    norm_text: str,
+    *,
+    use_nanairo: bool = False,
+) -> list[tuple[str, int]]:
     """
     テキストからカタカナとアクセントのペアのリストを返す。
-    推論時のみに使われる関数のため、常に `raise_yomi_error=False` を指定して g2p() を呼ぶ仕様になっている。
+    JP-Extra 前提かつ推論時のみに使われる関数のため、常に `raise_yomi_error=False` を指定して g2p() を呼ぶ仕様になっている。
 
     Args:
-        norm_text: 正規化されたテキスト。
+        norm_text (str): 正規化されたテキスト。
+        use_nanairo (bool, optional): Nanairo 専用の絵文字モーラを保持するかどうか。Defaults to False.
 
     Returns:
-        カタカナと音高のリスト。
+        list[tuple[str, int]]: カタカナと音高のリスト。
     """
 
-    phones, tones, *_ = g2p(norm_text, use_jp_extra=True, raise_yomi_error=False)
+    phones, tones, *_ = g2p(
+        norm_text,
+        use_jp_extra=True,
+        use_nanairo=use_nanairo,
+        raise_yomi_error=False,
+    )
     return phone_tone2kata_tone(list(zip(phones, tones)))
 
 
@@ -42,6 +52,10 @@ def phone_tone2kata_tone(phone_tone: list[tuple[str, int]]) -> list[tuple[str, i
     for phone, next_phone, tone, next_tone in zip(phones, phones[1:], tones, tones[1:]):
         # zip の関係で最後の ("_", 0) は無視されている
         if phone in PUNCTUATIONS:
+            result.append((phone, tone))
+            continue
+        # Nanairo 用の絵文字モーラは句読点と同様にそのままパススルーする
+        if is_nanairo_emoji_symbol(phone) is True:
             result.append((phone, tone))
             continue
         if phone in CONSONANTS:  # n以外の子音の場合
@@ -71,6 +85,9 @@ def kata_tone2phone_tone(kata_tone: list[tuple[str, int]]) -> list[tuple[str, in
     result: list[tuple[str, int]] = [("_", 0)]
     for mora, tone in kata_tone:
         if mora in PUNCTUATIONS:
+            result.append((mora, tone))
+        # Nanairo 用の絵文字モーラは句読点と同様にそのままパススルーする
+        elif is_nanairo_emoji_symbol(mora) is True:
             result.append((mora, tone))
         else:
             consonant, vowel = MORA_KATA_TO_MORA_PHONEMES[mora]

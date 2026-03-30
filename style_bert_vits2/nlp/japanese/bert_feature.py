@@ -21,9 +21,11 @@ def extract_bert_feature(
     text: str,
     word2ph: list[int],
     device: str,
+    *,
     assist_text: str | None = None,
     assist_text_weight: float = 0.7,
     sep_text: list[str] | None = None,
+    use_nanairo: bool = False,
 ) -> torch.Tensor:
     """
     日本語のテキストから BERT の特徴量を抽出する (PyTorch 推論)
@@ -35,6 +37,7 @@ def extract_bert_feature(
         assist_text (str | None, optional): 補助テキスト (デフォルト: None)
         assist_text_weight (float, optional): 補助テキストの重み (デフォルト: 0.7)
         sep_text (list[str] | None, optional): 単語単位の単語のリスト (デフォルト: None)
+        use_nanairo (bool, optional): Nanairo 専用の絵文字モーラを保持するかどうか。Defaults to False.
 
     Returns:
         torch.Tensor: BERT の特徴量
@@ -45,13 +48,23 @@ def extract_bert_feature(
     # sep_text が指定されていない場合のみ、text_to_sep_kata() を使って単語単位の単語のリストを作る
     # 指定されている時はそのリストをそのまま使うことで、何回も形態素解析処理が行われないようにする
     if sep_text is None:
-        sep_text = text_to_sep_kata(text, raise_yomi_error=False)[0]
+        sep_text = text_to_sep_kata(
+            text,
+            use_nanairo=use_nanairo,
+            raise_yomi_error=False,
+        )[0]
 
     # 各単語が何文字かを作る `word2ph` を使う必要があるので、読めない文字は必ず無視する
     # でないと `word2ph` の結果とテキストの文字数結果が整合性が取れない
     text = "".join(sep_text)
     if assist_text:
-        assist_text = "".join(text_to_sep_kata(assist_text, raise_yomi_error=False)[0])
+        assist_text = "".join(
+            text_to_sep_kata(
+                assist_text,
+                use_nanairo=use_nanairo,
+                raise_yomi_error=False,
+            )[0]
+        )
 
     if device == "cuda" and not torch.cuda.is_available():
         device = "cpu"
@@ -91,9 +104,11 @@ def extract_bert_feature_onnx(
     text: str,
     word2ph: list[int],
     onnx_providers: Sequence[str | tuple[str, dict[str, Any]]],
+    *,
     assist_text: str | None = None,
     assist_text_weight: float = 0.7,
     sep_text: list[str] | None = None,
+    use_nanairo: bool = False,
 ) -> NDArray[Any]:
     """
     日本語のテキストから BERT の特徴量を抽出する (ONNX 推論)
@@ -105,6 +120,7 @@ def extract_bert_feature_onnx(
         assist_text (str | None, optional): 補助テキスト (デフォルト: None)
         assist_text_weight (float, optional): 補助テキストの重み (デフォルト: 0.7)
         sep_text (list[str] | None, optional): 単語単位の単語のリスト (デフォルト: None)
+        use_nanairo (bool, optional): Nanairo 専用の絵文字モーラを保持するかどうか。Defaults to False.
 
     Returns:
         NDArray[Any]: BERT の特徴量
@@ -113,13 +129,23 @@ def extract_bert_feature_onnx(
     # sep_text が指定されていない場合のみ、text_to_sep_kata() を使って単語単位の単語のリストを作る
     # 指定されている時はそのリストをそのまま使うことで、何回も形態素解析処理が行われないようにする
     if sep_text is None:
-        sep_text = text_to_sep_kata(text, raise_yomi_error=False)[0]
+        sep_text = text_to_sep_kata(
+            text,
+            use_nanairo=use_nanairo,
+            raise_yomi_error=False,
+        )[0]
 
     # 各単語が何文字かを作る `word2ph` を使う必要があるので、読めない文字は必ず無視する
     # でないと `word2ph` の結果とテキストの文字数結果が整合性が取れない
     text = "".join(sep_text)
     if assist_text:
-        assist_text = "".join(text_to_sep_kata(assist_text, raise_yomi_error=False)[0])
+        assist_text = "".join(
+            text_to_sep_kata(
+                assist_text,
+                use_nanairo=use_nanairo,
+                raise_yomi_error=False,
+            )[0]
+        )
 
     # トークナイザーとモデルの読み込み
     tokenizer = onnx_bert_models.load_tokenizer(Languages.JP)

@@ -62,17 +62,24 @@ def get_text_onnx(
     NDArray[Any], NDArray[Any], NDArray[Any], NDArray[Any], NDArray[Any], NDArray[Any]
 ]:
     is_jp_extra_like_model = hps.is_jp_extra_like_model()
+    is_nanairo_like_model = hps.is_nanairo_like_model()
     norm_text, phone, tone, word2ph, sep_text, _, _ = clean_text_with_given_phone_tone(
         text,
         language_str,
         given_phone=given_phone,
         given_tone=given_tone,
         use_jp_extra=is_jp_extra_like_model,
+        use_nanairo=is_nanairo_like_model,
         # 推論時のみ呼び出されるので、raise_yomi_error は False に設定
         raise_yomi_error=False,
         jtalk=jtalk,
     )
-    phone, tone, language = cleaned_text_to_sequence(phone, tone, language_str)
+    phone, tone, language = cleaned_text_to_sequence(
+        phone,
+        tone,
+        language_str,
+        use_nanairo=is_nanairo_like_model,
+    )
 
     if hps.data.add_blank:
         phone = __intersperse(phone, 0)
@@ -86,9 +93,10 @@ def get_text_onnx(
         word2ph,
         language_str,
         onnx_providers,
-        assist_text,
-        assist_text_weight,
-        sep_text,  # clean_text_with_given_phone_tone() の中間生成物を再利用して効率向上を図る
+        assist_text=assist_text,
+        assist_text_weight=assist_text_weight,
+        sep_text=sep_text,  # clean_text_with_given_phone_tone() の中間生成物を再利用して効率向上を図る
+        use_nanairo=is_nanairo_like_model,
     )
     del word2ph
     assert bert_ori.shape[-1] == len(phone), phone
@@ -142,6 +150,11 @@ def infer_onnx(
     ONNX 版音声合成モデルの推論を実行する関数。
     """
     is_jp_extra_like_model = hps.is_jp_extra_like_model()
+    is_nanairo_like_model = hps.is_nanairo_like_model()
+    # TODO: Nanairo でも ONNX 推論をサポートする
+    if is_nanairo_like_model is True:
+        raise NotImplementedError("Nanairo ONNX inference is not supported yet.")
+
     # テキストから BERT 特徴量・音素列・アクセント列・言語 ID を取得
     # zh_bert, ja_bert, en_bert のうち、指定された言語に対応する1つのみが実際の特徴量を持ち、残りの2つは空のテンソルになる
     zh_bert, ja_bert, en_bert, phones, tones, lang_ids = get_text_onnx(

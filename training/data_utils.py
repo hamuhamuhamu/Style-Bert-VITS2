@@ -67,6 +67,7 @@ class TextAudioSpeakerLoader(Dataset[tuple[Any, ...]]):
         self.spk_map = hparams.spk2id
         self.hparams = hparams
         self.use_jp_extra = getattr(hparams, "use_jp_extra", False)
+        self.use_nanairo = getattr(hparams, "use_nanairo", False)
 
         self.use_mel_spec_posterior = getattr(
             hparams, "use_mel_posterior_encoder", False
@@ -431,7 +432,10 @@ class TextAudioSpeakerLoader(Dataset[tuple[Any, ...]]):
             language,
         )
         phone_seq, tone_seq, language_seq = cleaned_text_to_sequence(
-            phone, tone, language
+            phone,
+            tone,
+            language,
+            use_nanairo=self.use_nanairo,
         )
         if self.add_blank:
             phone_seq = commons.intersperse(phone_seq, 0)

@@ -8,11 +8,57 @@ from safetensors.torch import save_file
 from style_bert_vits2.logging import logger
 
 
+def _build_partially_loadable_embedding_tensor(
+    parameter_key: str,
+    checkpoint_tensor: torch.Tensor,
+    current_tensor: torch.Tensor,
+    allow_partial_load_embedding_keys: tuple[str, ...],
+) -> torch.Tensor | None:
+    """
+    明示 opt-in された embedding key のみ、語彙拡張時の prefix 行を部分ロードする。
+
+    Args:
+        parameter_key (str): state_dict のキー
+        checkpoint_tensor (torch.Tensor): checkpoint 側の tensor
+        current_tensor (torch.Tensor): 現在 model 側の tensor
+        allow_partial_load_embedding_keys (tuple[str, ...]): 部分ロードを許可する key suffix
+
+    Returns:
+        torch.Tensor | None: 部分ロード後の tensor。適用できない場合は None
+    """
+
+    if not any(
+        parameter_key.endswith(suffix) for suffix in allow_partial_load_embedding_keys
+    ):
+        return None
+    if checkpoint_tensor.ndim != current_tensor.ndim or checkpoint_tensor.ndim < 2:
+        return None
+    if checkpoint_tensor.shape[1:] != current_tensor.shape[1:]:
+        return None
+    if current_tensor.shape[0] < checkpoint_tensor.shape[0]:
+        return None
+
+    shared_rows = min(checkpoint_tensor.shape[0], current_tensor.shape[0])
+    if shared_rows <= 0:
+        return None
+
+    merged_tensor = current_tensor.detach().clone()
+    merged_tensor[:shared_rows] = checkpoint_tensor[:shared_rows].to(
+        device=current_tensor.device,
+        dtype=current_tensor.dtype,
+    )
+    logger.warning(
+        f"Partially loaded embedding tensor. key: {parameter_key}, checkpoint_shape: {tuple(checkpoint_tensor.shape)}, model_shape: {tuple(current_tensor.shape)}, copied_rows: {shared_rows}"
+    )
+    return merged_tensor
+
+
 def load_safetensors(
     checkpoint_path: str | Path,
     model: torch.nn.Module,
     for_infer: bool = False,
     device: str | torch.device = "cpu",
+    allow_partial_load_embedding_keys: tuple[str, ...] = (),
 ) -> tuple[torch.nn.Module, int | None]:
     """
     指定されたパスから safetensors モデルを読み込み、モデルとイテレーションを返す。
@@ -21,6 +67,7 @@ def load_safetensors(
         checkpoint_path (str | Path): モデルのチェックポイントファイルのパス
         model (torch.nn.Module): 読み込む対象のモデル
         for_infer (bool): 推論用に読み込むかどうかのフラグ
+        allow_partial_load_embedding_keys (tuple[str, ...]): 語彙拡張時に prefix 行の部分ロードを許可するための embedding key suffix
 
     Returns:
         tuple[torch.nn.Module, int | None]: 読み込まれたモデルとイテレーション回数（存在する場合）
@@ -33,10 +80,39 @@ def load_safetensors(
             if key == "iteration":
                 iteration = f.get_tensor(key).item()
             tensors[key] = f.get_tensor(key)
+
     if hasattr(model, "module"):
-        result = model.module.load_state_dict(tensors, strict=False)  # type: ignore
+        current_state_dict = model.module.state_dict()  # type: ignore
     else:
-        result = model.load_state_dict(tensors, strict=False)
+        current_state_dict = model.state_dict()
+
+    new_state_dict: dict[str, torch.Tensor] = dict(tensors)
+    for key, current_tensor in current_state_dict.items():
+        if key not in tensors:
+            continue
+
+        if tensors[key].shape == current_tensor.shape:
+            continue
+
+        partially_loadable_tensor = _build_partially_loadable_embedding_tensor(
+            parameter_key=key,
+            checkpoint_tensor=tensors[key],
+            current_tensor=current_tensor,
+            allow_partial_load_embedding_keys=allow_partial_load_embedding_keys,
+        )
+        if partially_loadable_tensor is not None:
+            new_state_dict[key] = partially_loadable_tensor
+            continue
+
+        if key.startswith("enc_q") and for_infer:
+            new_state_dict.pop(key, None)
+            continue
+
+    if hasattr(model, "module"):
+        result = model.module.load_state_dict(new_state_dict, strict=False)  # type: ignore
+    else:
+        result = model.load_state_dict(new_state_dict, strict=False)
+
     for key in result.missing_keys:
         if key.startswith("enc_q") and for_infer:
             continue

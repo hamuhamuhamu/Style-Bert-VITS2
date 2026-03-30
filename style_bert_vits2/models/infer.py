@@ -26,7 +26,7 @@ from style_bert_vits2.nlp import (
     cleaned_text_to_sequence,
     extract_bert_feature,
 )
-from style_bert_vits2.nlp.symbols import SYMBOLS
+from style_bert_vits2.nlp.symbols import NANAIRO_SYMBOLS, SYMBOLS
 
 
 class EmptyInitOnDevice(TorchFunctionMode):
@@ -56,11 +56,13 @@ def get_net_g(
     hps: HyperParameters,
     use_fp16: bool = False,
 ) -> SynthesizerTrn | SynthesizerTrnJPExtra | SynthesizerTrnNanairo:
+    is_jp_extra_like_model = hps.is_jp_extra_like_model()
+    is_nanairo_like_model = hps.is_nanairo_like_model()
     with EmptyInitOnDevice(device):
-        if version.endswith("Nanairo"):
+        if is_nanairo_like_model is True:
             logger.info("Using Nanairo model")
             net_g = SynthesizerTrnNanairo(
-                n_vocab=len(SYMBOLS),
+                n_vocab=len(NANAIRO_SYMBOLS),
                 spec_channels=hps.data.filter_length // 2 + 1,
                 segment_size=hps.train.segment_size // hps.data.hop_length,
                 n_speakers=hps.data.n_speakers,
@@ -91,7 +93,7 @@ def get_net_g(
                 speaker_adapter_input_dim=hps.model.speaker_adapter_input_dim,
                 speaker_adapter_bottleneck_dim=hps.model.speaker_adapter_bottleneck_dim,
             ).to(device)
-        elif version.endswith("JP-Extra"):
+        elif is_jp_extra_like_model is True:
             logger.info("Using JP-Extra model")
             net_g = SynthesizerTrnJPExtra(
                 n_vocab=len(SYMBOLS),
@@ -195,17 +197,24 @@ def get_text(
     torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
 ]:
     is_jp_extra_like_model = hps.is_jp_extra_like_model()
+    is_nanairo_like_model = hps.is_nanairo_like_model()
     norm_text, phone, tone, word2ph, sep_text, _, _ = clean_text_with_given_phone_tone(
         text,
         language_str,
         given_phone=given_phone,
         given_tone=given_tone,
         use_jp_extra=is_jp_extra_like_model,
+        use_nanairo=is_nanairo_like_model,
         # 推論時のみ呼び出されるので、raise_yomi_error は False に設定
         raise_yomi_error=False,
         jtalk=jtalk,
     )
-    phone, tone, language = cleaned_text_to_sequence(phone, tone, language_str)
+    phone, tone, language = cleaned_text_to_sequence(
+        phone,
+        tone,
+        language_str,
+        use_nanairo=is_nanairo_like_model,
+    )
 
     if hps.data.add_blank:
         phone = commons.intersperse(phone, 0)
@@ -219,9 +228,10 @@ def get_text(
         word2ph,
         language_str,
         device,
-        assist_text,
-        assist_text_weight,
-        sep_text,  # clean_text_with_given_phone_tone() の中間生成物を再利用して効率向上を図る
+        assist_text=assist_text,
+        assist_text_weight=assist_text_weight,
+        sep_text=sep_text,  # clean_text_with_given_phone_tone() の中間生成物を再利用して効率向上を図る
+        use_nanairo=is_nanairo_like_model,
     )
     del word2ph
     assert bert_ori.shape[-1] == len(phone), phone
@@ -443,6 +453,7 @@ def predict_token_durations(
     """
 
     is_jp_extra_like_model = hps.is_jp_extra_like_model()
+    is_nanairo_like_model = hps.is_nanairo_like_model()
 
     with torch.inference_mode():
         (
@@ -488,7 +499,7 @@ def predict_token_durations(
                 # （prepare_inference_data() 側で既に float32 になっているはずだが、念のため明示的に float32 に戻す）
                 ja_bert = ja_bert.float()
 
-            if hps.version.endswith("Nanairo"):
+            if is_nanairo_like_model is True:
                 x, _m_p, _logs_p, x_mask = cast(SynthesizerTrnNanairo, net_g).enc_p(
                     x_tst,
                     x_tst_lengths,
@@ -779,6 +790,7 @@ def infer(
     Nanairo（`use_speaker_adapter`）では、`speaker_embedding` に anime-speaker-embedding 由来のベクトル（例: `.spk.npy`）を渡す。
     """
     is_jp_extra_like_model = hps.is_jp_extra_like_model()
+    is_nanairo_like_model = hps.is_nanairo_like_model()
 
     # 推論データの前処理（共通処理）
     with torch.inference_mode():
@@ -826,10 +838,8 @@ def infer(
             )
         )
 
-        if (
-            is_jp_extra_like_model
-            and not hps.version.endswith("Nanairo")
-            and (speaker_embedding is not None or g_adjust is not None)
+        if is_nanairo_like_model is False and (
+            speaker_embedding is not None or g_adjust is not None
         ):
             raise ValueError(
                 "speaker_embedding or g_adjust is only supported for Nanairo."
@@ -844,7 +854,7 @@ def infer(
                 speaker_embedding = speaker_embedding.to(device).float()
             if isinstance(g_adjust, torch.Tensor):
                 g_adjust = g_adjust.to(device).float()
-            if hps.version.endswith("Nanairo"):
+            if is_nanairo_like_model is True:
                 output = cast(SynthesizerTrnNanairo, net_g).infer(
                     x_tst,
                     x_tst_lengths,
@@ -962,6 +972,7 @@ def infer_stream(
         "overlap_size must be even for proper margin calculation."
     )
     is_jp_extra_like_model = hps.is_jp_extra_like_model()
+    is_nanairo_like_model = hps.is_nanairo_like_model()
 
     # 推論データの前処理（共通処理）
     with torch.inference_mode():
@@ -1011,7 +1022,7 @@ def infer_stream(
 
         # Generator 実行前の共通処理を実行
         if is_jp_extra_like_model:
-            if hps.version.endswith("Nanairo"):
+            if is_nanairo_like_model is True:
                 z, y_mask, g, attn, z_p, m_p, logs_p = cast(
                     SynthesizerTrnNanairo, net_g
                 ).infer_input_feature(

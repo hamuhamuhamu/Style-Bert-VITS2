@@ -65,6 +65,7 @@ def process_line(
     line: str,
     wavs_dir: Path,
     use_jp_extra: bool,
+    use_nanairo: bool,
     yomi_error: str,
 ) -> str:
     """
@@ -76,6 +77,7 @@ def process_line(
             - 6 列: `utt|spk|language|text|phones|tones`
         wavs_dir (Path): wavs ディレクトリのパス
         use_jp_extra (bool): JP-Extra モードを使用するかどうか
+        use_nanairo (bool): Nanairo モードを使用するかどうか
         yomi_error (str): 読みエラー時の挙動（"raise", "skip", "use"）
 
     Returns:
@@ -103,6 +105,7 @@ def process_line(
         given_phone=given_phone,
         given_tone=given_tone,
         use_jp_extra=use_jp_extra,
+        use_nanairo=use_nanairo,
         raise_yomi_error=(yomi_error != "use"),
     )
 
@@ -149,6 +152,7 @@ def preprocess(
     val_per_lang: int,
     max_val_total: int,
     use_jp_extra: bool,
+    use_nanairo: bool,
     yomi_error: str,
 ) -> None:
     """
@@ -168,6 +172,7 @@ def preprocess(
         val_per_lang (int): 話者ごとの検証データ数
         max_val_total (int): 検証データの最大数
         use_jp_extra (bool): JP-Extra モードを使用するかどうか
+        use_nanairo (bool): Nanairo モードを使用するかどうか
         yomi_error (str): 読みエラー時の挙動（"raise", "skip", "use"）
     """
 
@@ -193,6 +198,7 @@ def preprocess(
                     line,
                     wavs_dir,
                     use_jp_extra,
+                    use_nanairo,
                     yomi_error,
                 )
                 out_file.write(processed_line)
@@ -340,6 +346,7 @@ if __name__ == "__main__":
     paths = TrainingModelPaths(model_folder_name)
     hyper_parameters = HyperParameters.load_from_json(paths.config_path)
     use_jp_extra = hyper_parameters.is_jp_extra_like_model()
+    use_nanairo = hyper_parameters.is_nanairo_like_model()
 
     transcription_path = paths.esd_list_path
     cleaned_path = paths.esd_list_cleaned_path
@@ -361,5 +368,6 @@ if __name__ == "__main__":
         val_per_lang=val_per_lang,
         max_val_total=max_val_total,
         use_jp_extra=use_jp_extra,
+        use_nanairo=use_nanairo,
         yomi_error=yomi_error,
     )

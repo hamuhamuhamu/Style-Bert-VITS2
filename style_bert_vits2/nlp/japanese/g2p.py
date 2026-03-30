@@ -10,12 +10,19 @@ from style_bert_vits2.nlp import bert_models
 from style_bert_vits2.nlp.japanese import pyopenjtalk_worker as pyopenjtalk
 from style_bert_vits2.nlp.japanese.mora_list import MORA_KATA_TO_MORA_PHONEMES, VOWELS
 from style_bert_vits2.nlp.japanese.normalizer import replace_punctuation
-from style_bert_vits2.nlp.symbols import PUNCTUATIONS
+from style_bert_vits2.nlp.symbols import (
+    PUNCTUATIONS,
+    contains_nanairo_emoji_symbols,
+    is_nanairo_emoji_symbol,
+    split_text_by_nanairo_emoji_symbols,
+)
 
 
 def g2p(
     norm_text: str,
+    *,
     use_jp_extra: bool = True,
+    use_nanairo: bool = False,
     raise_yomi_error: bool = False,
     jtalk: OpenJTalk | None = None,
 ) -> tuple[list[str], list[int], list[int], list[str], list[str], list[str]]:
@@ -33,6 +40,7 @@ def g2p(
     Args:
         norm_text (str): 正規化済みテキスト
         use_jp_extra (bool, optional): False の場合、「ん」の音素を「N」ではなく「n」とする。Defaults to True.
+        use_nanairo (bool, optional): Nanairo 専用の絵文字モーラを保持するかどうか。Defaults to False.
         raise_yomi_error (bool, optional): False の場合、読めない文字が「'」として発音される。Defaults to False.
         jtalk (OpenJTalk | None, optional): 未指定時は pyopenjtalk モジュール内部で保持されているインスタンスが自動的に利用される。
 
@@ -45,6 +53,63 @@ def g2p(
             - sep_kata: 単語単位の単語のカタカナ読みのリスト
             - sep_kata_with_joshi: 単語単位の単語のカタカナ読みのリスト (助詞を直前の単語に連結している)
     """
+
+    # Nanairo 用: 絵文字を1モーラ相当として切り出してから g2p する
+    ## OpenJTalk は絵文字を扱えないため、絵文字を punctuation 相当の1モーラ記号として切り離し、
+    ## 絵文字以外の部分だけ既存の g2p に通してから結合する
+    if use_nanairo is True and contains_nanairo_emoji_symbols(norm_text) is True:
+        merged_phones: list[str] = []
+        merged_tones: list[int] = []
+        merged_word2ph: list[int] = []
+        merged_sep_text: list[str] = []
+        merged_sep_kata: list[str] = []
+        merged_sep_kata_with_joshi: list[str] = []
+        for segment in split_text_by_nanairo_emoji_symbols(norm_text):
+            if not segment:
+                continue
+            if is_nanairo_emoji_symbol(segment) is True:
+                merged_phones.append(segment)
+                merged_tones.append(0)
+                merged_word2ph.append(1)
+                merged_sep_text.append(segment)
+                merged_sep_kata.append(segment)
+                merged_sep_kata_with_joshi.append(segment)
+                continue
+            (
+                segment_phones,
+                segment_tones,
+                segment_word2ph,
+                segment_sep_text,
+                segment_sep_kata,
+                segment_sep_kata_with_joshi,
+            ) = g2p(
+                segment,
+                use_jp_extra=use_jp_extra,
+                use_nanairo=False,
+                raise_yomi_error=raise_yomi_error,
+                jtalk=jtalk,
+            )
+            merged_phones.extend(segment_phones[1:-1])
+            merged_tones.extend(segment_tones[1:-1])
+            merged_word2ph.extend(segment_word2ph[1:-1])
+            merged_sep_text.extend(segment_sep_text)
+            merged_sep_kata.extend(segment_sep_kata)
+            merged_sep_kata_with_joshi.extend(segment_sep_kata_with_joshi)
+
+        phones = ["_", *merged_phones, "_"]
+        tones = [0, *merged_tones, 0]
+        word2ph = [1, *merged_word2ph, 1]
+        if not use_jp_extra:
+            phones = [phone if phone != "N" else "n" for phone in phones]
+        assert len(phones) == sum(word2ph), f"{len(phones)} != {sum(word2ph)}"
+        return (
+            phones,
+            tones,
+            word2ph,
+            merged_sep_text,
+            merged_sep_kata,
+            merged_sep_kata_with_joshi,
+        )
 
     # pyopenjtalk のフルコンテキストラベルを使ってアクセントを取り出すと、punctuation の位置が消えてしまい情報が失われてしまう：
     # 「こんにちは、世界。」と「こんにちは！世界。」と「こんにちは！！！？？？世界……。」は全て同じになる。
@@ -64,6 +129,7 @@ def g2p(
     sep_text, sep_kata, sep_kata_with_joshi = text_to_sep_kata(
         norm_text,
         njd_features=njd_features,
+        use_nanairo=use_nanairo,
         raise_yomi_error=raise_yomi_error,
         jtalk=jtalk,
     )
@@ -118,7 +184,9 @@ def g2p(
 
 def text_to_sep_kata(
     norm_text: str,
+    *,
     njd_features: list[NJDFeature] | None = None,
+    use_nanairo: bool = False,
     raise_yomi_error: bool = False,
     jtalk: OpenJTalk | None = None,
 ) -> tuple[list[str], list[str], list[str]]:
@@ -133,12 +201,43 @@ def text_to_sep_kata(
     Args:
         norm_text (str): 正規化済みテキスト
         njd_features (list[NJDFeature] | None, optional): pyopenjtalk.run_frontend() の結果。None の場合は内部で実行する。
+        use_nanairo (bool, optional): Nanairo 専用の絵文字モーラを保持するかどうか。Defaults to False.
         raise_yomi_error (bool, optional): False の場合、読めない文字が「'」として発音される。Defaults to False.
         jtalk (OpenJTalk | None, optional): 未指定時は pyopenjtalk モジュール内部で保持されているインスタンスが自動的に利用される。
 
     Returns:
         tuple[list[str], list[str], list[str]]: 分割された単語リストと、その読み（カタカナ or 記号1文字）のリスト、助詞を連結した読みのリスト
     """
+
+    # Nanairo では、絵文字を 1 文字の記号トークンとして単語分割結果にそのまま残す
+    # text_to_sep_kata() を単体で呼ぶ場合でも g2p() と同じ分割境界になり、word2ph の対応ずれを防ぐ
+    if use_nanairo is True and contains_nanairo_emoji_symbols(norm_text) is True:
+        merged_sep_text: list[str] = []
+        merged_sep_kata: list[str] = []
+        merged_sep_kata_with_joshi: list[str] = []
+        for segment in split_text_by_nanairo_emoji_symbols(norm_text):
+            if not segment:
+                continue
+            if is_nanairo_emoji_symbol(segment) is True:
+                merged_sep_text.append(segment)
+                merged_sep_kata.append(segment)
+                merged_sep_kata_with_joshi.append(segment)
+                continue
+            (
+                segment_sep_text,
+                segment_sep_kata,
+                segment_sep_kata_with_joshi,
+            ) = text_to_sep_kata(
+                segment,
+                njd_features=None,
+                use_nanairo=False,
+                raise_yomi_error=raise_yomi_error,
+                jtalk=jtalk,
+            )
+            merged_sep_text.extend(segment_sep_text)
+            merged_sep_kata.extend(segment_sep_kata)
+            merged_sep_kata_with_joshi.extend(segment_sep_kata_with_joshi)
+        return merged_sep_text, merged_sep_kata, merged_sep_kata_with_joshi
 
     # njd_features: OpenJTalkの解析結果
     if njd_features is None:

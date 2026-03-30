@@ -8,7 +8,7 @@ from torch.nn import functional as F
 from torch.nn.utils import remove_weight_norm, spectral_norm, weight_norm
 
 from style_bert_vits2.models import attentions, commons, modules, monotonic_alignment
-from style_bert_vits2.nlp.symbols import NUM_LANGUAGES, NUM_TONES, SYMBOLS
+from style_bert_vits2.nlp.symbols import NANAIRO_SYMBOLS, NUM_LANGUAGES, NUM_TONES
 
 
 class DurationDiscriminator(nn.Module):  # vits2
@@ -509,7 +509,13 @@ class TextEncoder(nn.Module):
         self.kernel_size = kernel_size
         self.p_dropout = p_dropout
         self.gin_channels = gin_channels
-        self.emb = nn.Embedding(len(SYMBOLS), hidden_channels)
+
+        # Keep TextEncoder vocabulary size consistent with the caller contract.
+        # Nanairo extends the token inventory, so detect mismatches against NANAIRO_SYMBOLS early.
+        assert n_vocab == len(NANAIRO_SYMBOLS), (
+            f"Nanairo TextEncoder expected n_vocab: {len(NANAIRO_SYMBOLS)}, got: {n_vocab}"
+        )
+        self.emb = nn.Embedding(n_vocab, hidden_channels)
         nn.init.normal_(self.emb.weight, 0.0, hidden_channels**-0.5)
         self.tone_emb = nn.Embedding(NUM_TONES, hidden_channels)
         nn.init.normal_(self.tone_emb.weight, 0.0, hidden_channels**-0.5)
