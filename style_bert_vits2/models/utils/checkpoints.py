@@ -83,13 +83,12 @@ def load_checkpoint(
     new_state_dict = {}
     for k, v in state_dict.items():
         try:
-            # assert "emb_g" not in k
+            if k not in saved_state_dict:
+                raise KeyError(k)
+            if saved_state_dict[k].shape != v.shape:
+                raise ValueError((saved_state_dict[k].shape, v.shape))
             new_state_dict[k] = saved_state_dict[k]
-            assert saved_state_dict[k].shape == v.shape, (
-                saved_state_dict[k].shape,
-                v.shape,
-            )
-        except:
+        except Exception:
             # For upgrading from the old version
             if "ja_bert_proj" in k:
                 v = torch.zeros_like(v)
