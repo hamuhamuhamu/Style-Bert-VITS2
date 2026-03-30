@@ -155,10 +155,10 @@ def initialize_worker(port: int = WORKER_PORT) -> None:
 
 # top-level declaration
 def terminate_worker() -> None:
-    logger.debug("pyopenjtalk worker server terminated")
     global WORKER_CLIENT
     if not WORKER_CLIENT:
         return
+    logger.debug("pyopenjtalk worker server terminated")
 
     # prepare for unexpected errors
     try:
