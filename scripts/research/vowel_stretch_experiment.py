@@ -395,7 +395,7 @@ def main() -> None:
             logger.warning(f"net_g is not loaded. name: {model_name}")
             continue
 
-        if not tts_model.hyper_parameters.version.endswith("JP-Extra"):
+        if not tts_model.hyper_parameters.is_jp_extra_like_model():
             logger.warning(
                 f"Skipping non JP-Extra model. name: {model_name}, version: {tts_model.hyper_parameters.version}"
             )

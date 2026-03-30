@@ -106,7 +106,7 @@ def select_target_model(
                 info.name,
                 holder.model_files_dict[info.name][0].as_posix(),
             )
-            if str(tmp_model.hyper_parameters.version).endswith("JP-Extra"):
+            if tmp_model.hyper_parameters.is_jp_extra_like_model():
                 target_info = info
                 break
         if target_info is None:

@@ -302,7 +302,7 @@ def main() -> None:
 
             net_g = tts_model.net_g
             assert net_g is not None
-            is_jp_extra = hps.version.endswith("JP-Extra")
+            is_jp_extra = hps.is_jp_extra_like_model()
             if is_jp_extra:
                 _z, _y_mask, _g, attn, *_ = cast(
                     SynthesizerTrnJPExtra, net_g
