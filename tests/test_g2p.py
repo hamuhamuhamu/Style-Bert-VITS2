@@ -18,6 +18,7 @@ from style_bert_vits2.nlp.japanese.pyopenjtalk_worker import (
     initialize_worker,
     terminate_worker,
 )
+from style_bert_vits2.nlp.nanairo_emoji import normalize_nanairo_emoji_text
 
 
 NANAIRO_LAUGH_TEXT = "そう?🤭こうしてると,なんだか淳之介くんとデートしてるみたいだね?"
@@ -432,3 +433,61 @@ def test_kata_tone2phone_tone_preserves_emoji_position() -> None:
     # 先頭 _ + a + 😠 + i + _ の 5 トークン
     assert phones == ["_", "a", "😠", "i", "_"]
     assert tones[phones.index("😠")] == 0
+
+
+# ============================================================
+# normalize_nanairo_emoji_text のテスト
+# ============================================================
+
+
+def test_normalize_nanairo_emoji_text_removes_vs16_only_for_nanairo_emojis() -> None:
+    """Nanairo 定義済み絵文字に付く VS16 のみ除去し、それ以外の記号の VS16 は保持する。"""
+
+    # Nanairo 定義済み: ⏸️ (U+23F8 + U+FE0F) → ⏸ (U+23F8)
+    assert normalize_nanairo_emoji_text("テスト⏸\ufe0fです") == "テスト⏸です"
+    # Nanairo 定義済み: 🌬️ (U+1F32C + U+FE0F) → 🌬 (U+1F32C)
+    assert normalize_nanairo_emoji_text("🌬\ufe0f") == "🌬"
+    # Nanairo 非定義: ♾️ (U+267E + U+FE0F) → VS16 は保持される（normalize_text が ♾️ を認識するのを壊さない）
+    assert normalize_nanairo_emoji_text("♾\ufe0f") == "♾\ufe0f"
+    # Nanairo 非定義: 👍 + 肌色修飾子 → 保持される
+    assert normalize_nanairo_emoji_text("👍\U0001f3fd") == "👍\U0001f3fd"
+
+
+def test_normalize_nanairo_emoji_text_removes_skin_tone_modifiers() -> None:
+    """肌色修飾子 (U+1F3FB-U+1F3FF) を除去する。"""
+
+    # 🙏🏽 (U+1F64F + U+1F3FD) → 🙏 (U+1F64F)
+    assert normalize_nanairo_emoji_text("🙏\U0001f3fd") == "🙏"
+    # 👌🏻 (U+1F44C + U+1F3FB) → 👌 (U+1F44C)
+    assert normalize_nanairo_emoji_text("テスト👌\U0001f3fbです") == "テスト👌です"
+
+
+def test_normalize_nanairo_emoji_text_resolves_zwj_sequence() -> None:
+    """ZWJ sequence を定義済み絵文字に分解する。"""
+
+    # 😮‍💨 (U+1F62E + U+200D + U+1F4A8) → 💨 (U+1F4A8)
+    assert normalize_nanairo_emoji_text("テスト😮\u200d💨です") == "テスト💨です"
+
+
+def test_normalize_nanairo_emoji_text_applies_semantic_mapping() -> None:
+    """意味的に近い絵文字を定義済み絵文字にマッピングする。"""
+
+    # 😡 → 😠 (怒り系)
+    assert normalize_nanairo_emoji_text("なんで😡") == "なんで😠"
+    # 😂 → 😆 (笑い系)
+    assert normalize_nanairo_emoji_text("ウケる😂") == "ウケる😆"
+    # 😢 → 😭 (泣き系)
+    assert normalize_nanairo_emoji_text("悲しい😢") == "悲しい😭"
+
+
+def test_normalize_nanairo_emoji_text_preserves_defined_emojis() -> None:
+    """Nanairo 定義済み絵文字はそのまま保持する。"""
+
+    assert normalize_nanairo_emoji_text("テスト🤭です😠よ") == "テスト🤭です😠よ"
+
+
+def test_normalize_nanairo_emoji_text_combined() -> None:
+    """VS16 + 意味的マッピングが同時に適用される。"""
+
+    # ❤️ (U+2764 + U+FE0F) → VS16除去 → ❤ → 意味的マッピング → 🫶
+    assert normalize_nanairo_emoji_text("大好き❤\ufe0f") == "大好き🫶"

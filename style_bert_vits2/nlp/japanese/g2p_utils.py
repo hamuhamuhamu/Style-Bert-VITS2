@@ -4,7 +4,8 @@ from style_bert_vits2.nlp.japanese.mora_list import (
     MORA_KATA_TO_MORA_PHONEMES,
     MORA_PHONEMES_TO_MORA_KATA,
 )
-from style_bert_vits2.nlp.symbols import PUNCTUATIONS, is_nanairo_emoji_symbol
+from style_bert_vits2.nlp.nanairo_emoji import is_nanairo_emoji_symbol
+from style_bert_vits2.nlp.symbols import PUNCTUATIONS
 
 
 def g2kata_tone(

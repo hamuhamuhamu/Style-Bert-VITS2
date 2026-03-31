@@ -7,15 +7,18 @@ from numpy.typing import NDArray
 from pyopenjtalk import OpenJTalk
 
 from style_bert_vits2.constants import Languages
+from style_bert_vits2.nlp.nanairo_emoji import (
+    contains_nanairo_emoji_symbols,
+    is_nanairo_emoji_symbol,
+    normalize_nanairo_emoji_text,
+    split_text_by_nanairo_emoji_symbols,
+    strip_nanairo_emoji_symbols,
+)
 from style_bert_vits2.nlp.symbols import (
     LANGUAGE_ID_MAP,
     LANGUAGE_TONE_START_MAP,
     NANAIRO_SYMBOLS,
     SYMBOLS,
-    contains_nanairo_emoji_symbols,
-    is_nanairo_emoji_symbol,
-    split_text_by_nanairo_emoji_symbols,
-    strip_nanairo_emoji_symbols,
 )
 
 
@@ -202,7 +205,10 @@ def _clean_text(
         from style_bert_vits2.nlp.japanese.g2p import g2p
         from style_bert_vits2.nlp.japanese.normalizer import normalize_text
 
-        # Nanairo では、絵文字部分のみ正規化対象から除外し、それ以外の部分を通常通り正規化する
+        # Nanairo では、まず入力テキスト中の絵文字を Nanairo 定義済み絵文字に正規化し、
+        # その後、絵文字部分のみテキスト正規化対象から除外してそれ以外の部分を通常通り正規化する
+        if use_nanairo is True:
+            text = normalize_nanairo_emoji_text(text)
         if use_nanairo is True and contains_nanairo_emoji_symbols(text) is True:
             normalized_segments: list[str] = []
             for segment in split_text_by_nanairo_emoji_symbols(text):
@@ -295,7 +301,9 @@ def clean_text_with_given_phone_tone(
 
     # Nanairo 非対応モデルでは絵文字モーラを事前に除去して処理を統一する
     # text / given_phone / given_tone を同じ基準で落とし、従来モデルの挙動互換を維持する
+    # 事前に正規化することで、VS16 付き絵文字（⏸️ 等）も確実に検出・除去する
     if language == Languages.JP and use_nanairo is False:
+        text = normalize_nanairo_emoji_text(text)
         if contains_nanairo_emoji_symbols(text) is True:
             text = strip_nanairo_emoji_symbols(text)
         if given_phone is not None and given_tone is not None:

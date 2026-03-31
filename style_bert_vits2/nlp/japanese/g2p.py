@@ -10,12 +10,12 @@ from style_bert_vits2.nlp import bert_models
 from style_bert_vits2.nlp.japanese import pyopenjtalk_worker as pyopenjtalk
 from style_bert_vits2.nlp.japanese.mora_list import MORA_KATA_TO_MORA_PHONEMES, VOWELS
 from style_bert_vits2.nlp.japanese.normalizer import replace_punctuation
-from style_bert_vits2.nlp.symbols import (
-    PUNCTUATIONS,
+from style_bert_vits2.nlp.nanairo_emoji import (
     contains_nanairo_emoji_symbols,
     is_nanairo_emoji_symbol,
     split_text_by_nanairo_emoji_symbols,
 )
+from style_bert_vits2.nlp.symbols import PUNCTUATIONS
 
 
 def g2p(
