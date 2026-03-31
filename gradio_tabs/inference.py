@@ -411,7 +411,7 @@ def create_inference_app(model_holder: TTSModelHolder) -> gr.Blocks:
                     label="改行ごとに挟む無音の長さ（秒）",
                 )
                 line_split.change(
-                    lambda x: (gr.Slider(visible=x)),
+                    lambda x: gr.Slider(visible=x),
                     inputs=[line_split],
                     outputs=[split_interval],
                 )
@@ -421,7 +421,7 @@ def create_inference_app(model_holder: TTSModelHolder) -> gr.Blocks:
                 )
                 use_tone = gr.Checkbox(label="アクセント調整を使う", value=False)
                 use_tone.change(
-                    lambda x: (gr.Checkbox(value=False) if x else gr.Checkbox()),
+                    lambda x: gr.Checkbox(value=False) if x else gr.Checkbox(),
                     inputs=[use_tone],
                     outputs=[line_split],
                 )

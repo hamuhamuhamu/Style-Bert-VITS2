@@ -1075,7 +1075,9 @@ def __replace_symbols(text: str) -> str:
 
     # 数式を処理
     text = __NUMBER_MATH_PATTERN.sub(
-        lambda m: f"{m.group(1)}{get_symbol_yomi(m.group(2))}{m.group(3)}イコール{m.group(4)}",
+        lambda m: (
+            f"{m.group(1)}{get_symbol_yomi(m.group(2))}{m.group(3)}イコール{m.group(4)}"
+        ),
         text,
     )
     # 比較演算子を処理

@@ -5,7 +5,7 @@ to avoid user dictionary access error
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pyopenjtalk import NJDFeature, OpenJTalk
 
@@ -23,8 +23,15 @@ WORKER_CLIENT: WorkerClient | None = None
 
 def run_frontend(
     text: str,
+    *,
     run_marine: bool = False,
     use_vanilla: bool = False,
+    use_sudachi_kanji_yomi: bool = True,
+    predict_nani: bool = True,
+    normalize_mode: Literal["None", "NFC", "NFKC"] = "None",
+    use_read_as_pron: bool = False,
+    revert_long_vowels: bool = False,
+    revert_yotsugana: bool = False,
     jtalk: OpenJTalk | None = None,
 ) -> list[NJDFeature]:
     if WORKER_CLIENT is not None:
@@ -35,7 +42,18 @@ def run_frontend(
         # without worker
         import pyopenjtalk
 
-        return pyopenjtalk.run_frontend(text, run_marine, use_vanilla, jtalk)
+        return pyopenjtalk.run_frontend(
+            text,
+            run_marine=run_marine,
+            use_vanilla=use_vanilla,
+            use_sudachi_kanji_yomi=use_sudachi_kanji_yomi,
+            predict_nani=predict_nani,
+            normalize_mode=normalize_mode,
+            use_read_as_pron=use_read_as_pron,
+            revert_long_vowels=revert_long_vowels,
+            revert_yotsugana=revert_yotsugana,
+            jtalk=jtalk,
+        )
 
 
 def make_label(
