@@ -1202,7 +1202,8 @@ def __replace_symbols(text: str) -> str:
             if seconds is not None:
                 result += "零分"
         elif 0 <= minutes <= 59:
-            result += f"{num2words(minutes, lang='ja')}分"
+            # 時刻の分は数字のまま残し、「十二分」「三分」などの pyopenjtalk の辞書にある単語への誤解析を避ける
+            result += f"{minutes}分"
         else:
             result += f"{num2words(minutes, lang='ja')}"
 
@@ -1218,7 +1219,7 @@ def __replace_symbols(text: str) -> str:
     text = __TIME_PATTERN.sub(convert_time, text)
 
     # 時刻またはアスペクト比の処理
-    # 時刻は 00:00:00 から 27:59:59 までの範囲であれば、漢数字に変換して「十四時五分三十秒」「二十四時」のように読み上げる
+    # 時刻は 00:00:00 から 27:59:59 までの範囲であれば、分を除き漢数字に変換して「十四時5分三十秒」「二十四時」のように読み上げる
     # それ以外ならアスペクト比と判断し「十六タイ九」のように読み上げる (「対」にすると「つい」と読んでしまう場合がある)
     def convert_time_or_aspect(match: re.Match[str]) -> str:
         hours = int(match.group(1))
@@ -1238,7 +1239,8 @@ def __replace_symbols(text: str) -> str:
                 if seconds is not None:
                     result += "零分"
             elif 0 <= minutes <= 59:
-                result += f"{num2words(minutes, lang='ja')}分"
+                # 時刻の分は数字のまま残し、「十二分」「三分」などの pyopenjtalk の辞書にある単語への誤解析を避ける
+                result += f"{minutes}分"
             else:
                 result += f"{num2words(minutes, lang='ja')}"
 

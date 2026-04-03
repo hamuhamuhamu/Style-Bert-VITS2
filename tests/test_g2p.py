@@ -3,9 +3,11 @@
 """
 
 from collections.abc import Iterator
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
+from num2words import num2words
 
 from preprocess_text import process_line
 from style_bert_vits2.constants import Languages
@@ -58,6 +60,312 @@ def _assert_phone_tone_word2ph_consistency(
     assert len(phones) == len(tones) == sum(word2ph)
     assert phones[0] == "_"
     assert phones[-1] == "_"
+
+
+def _extract_joined_sep_kata(text: str) -> tuple[str, str]:
+    """
+    入力テキストの正規化結果と、g2p が返したカタカナ読みを連結した文字列を取得する。
+
+    Args:
+        text (str): 読みを検証する入力テキスト
+
+    Returns:
+        tuple[str, str]: 正規化後テキストと、連結済みのカタカナ読み
+    """
+
+    norm_text, _, _, _, _, sep_kata, _ = clean_text_with_given_phone_tone(
+        text=text,
+        language=Languages.JP,
+        use_jp_extra=True,
+        raise_yomi_error=False,
+    )
+    assert sep_kata is not None
+    return norm_text, "".join(sep_kata)
+
+
+def _expected_minute_kata(minute: int) -> str:
+    """
+    分の助数詞表現における期待読みを返す。
+
+    Args:
+        minute (int): 分
+
+    Returns:
+        str: カタカナの期待読み
+    """
+
+    if minute == 0:
+        return ""
+
+    if minute in {10, 20, 30, 40, 50, 60, 70, 80, 90}:
+        tens_only_map = {
+            10: "ジュップン",
+            20: "ニジュップン",
+            30: "サンジュップン",
+            40: "ヨンジュップン",
+            50: "ゴジュップン",
+            60: "ロクジュップン",
+            70: "ナナジュップン",
+            80: "ハチジュップン",
+            90: "キュージュップン",
+        }
+        return tens_only_map[minute]
+
+    ones_map = {
+        1: "イップン",
+        2: "ニフン",
+        3: "サンプン",
+        4: "ヨンプン",
+        5: "ゴフン",
+        6: "ロップン",
+        7: "ナナフン",
+        8: "ハップン",
+        9: "キューフン",
+    }
+    tens_prefix_map = {
+        0: "",
+        1: "ジュー",
+        2: "ニジュー",
+        3: "サンジュー",
+        4: "ヨンジュー",
+        5: "ゴジュー",
+        6: "ロクジュー",
+        7: "ナナジュー",
+        8: "ハチジュー",
+        9: "キュージュー",
+    }
+    tens, ones = divmod(minute, 10)
+    return f"{tens_prefix_map[tens]}{ones_map[ones]}"
+
+
+def _expected_second_kata(second: int) -> str:
+    """
+    秒の助数詞表現における期待読みを返す。
+
+    Args:
+        second (int): 秒
+
+    Returns:
+        str: カタカナの期待読み
+    """
+
+    if second in {10, 20, 30, 40, 50, 60, 70, 80, 90}:
+        tens_only_map = {
+            10: "ジュービョー",
+            20: "ニジュービョー",
+            30: "サンジュービョー",
+            40: "ヨンジュービョー",
+            50: "ゴジュービョー",
+            60: "ロクジュービョー",
+            70: "ナナジュービョー",
+            80: "ハチジュービョー",
+            90: "キュージュービョー",
+        }
+        return tens_only_map[second]
+
+    ones_map = {
+        1: "イチビョー",
+        2: "ニビョー",
+        3: "サンビョー",
+        4: "ヨンビョー",
+        5: "ゴビョー",
+        6: "ロクビョー",
+        7: "ナナビョー",
+        8: "ハチビョー",
+        9: "キュービョー",
+    }
+    tens_prefix_map = {
+        0: "",
+        1: "ジュー",
+        2: "ニジュー",
+        3: "サンジュー",
+        4: "ヨンジュー",
+        5: "ゴジュー",
+        6: "ロクジュー",
+        7: "ナナジュー",
+        8: "ハチジュー",
+        9: "キュージュー",
+    }
+    tens, ones = divmod(second, 10)
+    return f"{tens_prefix_map[tens]}{ones_map[ones]}"
+
+
+def test_g2p_basic_sentence() -> None:
+    """基本的な文でも phones / tones / word2ph の整合性が保たれる。"""
+
+    _, phones, tones, word2ph, _, _, _ = clean_text_with_given_phone_tone(
+        text="今日はいい天気ですね.",
+        language=Languages.JP,
+        use_jp_extra=True,
+        raise_yomi_error=False,
+    )
+
+    _assert_phone_tone_word2ph_consistency(phones, tones, word2ph)
+
+
+def test_g2p_time_minutes_use_expected_counter_readings() -> None:
+    """時刻の分が文末でも助数詞読みになり、慣用句読みに吸われない。"""
+
+    # 0〜59 分の全パターンで、時刻の分が期待通りの読みになることを確認する
+    for minute in range(60):
+        norm_text, joined_sep_kata = _extract_joined_sep_kata(f"9時{minute}分")
+        expected_norm_text = "九時" if minute == 0 else f"九時{minute}分"
+        expected_joined_sep_kata = f"クジ{_expected_minute_kata(minute)}"
+        assert norm_text == expected_norm_text, (
+            f"Unexpected normalized text. minute: {minute}, "
+            f"actual: {norm_text}, expected: {expected_norm_text}"
+        )
+        assert joined_sep_kata == expected_joined_sep_kata, (
+            f"Unexpected minute reading. minute: {minute}, "
+            f"norm_text: {norm_text}, actual: {joined_sep_kata}, "
+            f"expected: {expected_joined_sep_kata}"
+        )
+
+
+def test_g2p_minute_counter_readings_match_up_to_99() -> None:
+    """数字 + 分の助数詞読みを 1〜99 まで回帰検証する。"""
+
+    # 助数詞そのものの読みは 99 まで全探索し、各十の位でも崩れないことを確認する
+    for minute in range(1, 100):
+        norm_text, joined_sep_kata = _extract_joined_sep_kata(f"{minute}分")
+        expected_norm_text = f"{minute}分"
+        expected_joined_sep_kata = _expected_minute_kata(minute)
+        assert norm_text == expected_norm_text, (
+            f"Unexpected normalized text. minute: {minute}, "
+            f"actual: {norm_text}, expected: {expected_norm_text}"
+        )
+        assert joined_sep_kata == expected_joined_sep_kata, (
+            f"Unexpected minute counter reading. minute: {minute}, "
+            f"norm_text: {norm_text}, actual: {joined_sep_kata}, "
+            f"expected: {expected_joined_sep_kata}"
+        )
+
+
+def test_g2p_time_seconds_keep_expected_counter_readings_after_12_fun() -> None:
+    """問題が出やすい 12 分の後ろに秒が続いても、時刻として正しく読める。"""
+
+    # 秒を全探索し、「十二分」が慣用句読みへ戻らないことと秒の助数詞読みを同時に確認する
+    for second in range(1, 60):
+        norm_text, joined_sep_kata = _extract_joined_sep_kata(f"9時12分{second}秒")
+        expected_norm_text = f"九時12分{num2words(second, lang='ja')}秒"
+        expected_joined_sep_kata = f"クジジューニフン{_expected_second_kata(second)}"
+        assert norm_text == expected_norm_text, (
+            f"Unexpected normalized text. second: {second}, "
+            f"actual: {norm_text}, expected: {expected_norm_text}"
+        )
+        assert joined_sep_kata == expected_joined_sep_kata, (
+            f"Unexpected second reading. second: {second}, "
+            f"norm_text: {norm_text}, actual: {joined_sep_kata}, "
+            f"expected: {expected_joined_sep_kata}"
+        )
+
+
+def test_g2p_second_counter_readings_match_up_to_99() -> None:
+    """数字 + 秒の助数詞読みを 1〜99 まで回帰検証する。"""
+
+    # 秒の助数詞読みも 99 まで全探索し、期待どおりの読みを維持することを確認する
+    for second in range(1, 100):
+        norm_text, joined_sep_kata = _extract_joined_sep_kata(f"{second}秒")
+        expected_norm_text = f"{second}秒"
+        expected_joined_sep_kata = _expected_second_kata(second)
+        assert norm_text == expected_norm_text, (
+            f"Unexpected normalized text. second: {second}, "
+            f"actual: {norm_text}, expected: {expected_norm_text}"
+        )
+        assert joined_sep_kata == expected_joined_sep_kata, (
+            f"Unexpected second counter reading. second: {second}, "
+            f"norm_text: {norm_text}, actual: {joined_sep_kata}, "
+            f"expected: {expected_joined_sep_kata}"
+        )
+
+
+@pytest.mark.parametrize(
+    ("text", "expected_norm_text", "expected_joined_sep_kata"),
+    [
+        (
+            "2025年9月1日",
+            "2025年9月1日",
+            "ニセンニジューゴネンクガツツイタチ",
+        ),
+        (
+            "2025年9月10日9時30分",
+            "2025年9月10日九時30分",
+            "ニセンニジューゴネンクガツトーカクジサンジュップン",
+        ),
+        (
+            "2025年9月12日9時12分",
+            "2025年9月12日九時12分",
+            "ニセンニジューゴネンクガツジューニニチクジジューニフン",
+        ),
+        (
+            "2025年9月20日9時45分",
+            "2025年9月20日九時45分",
+            "ニセンニジューゴネンクガツハツカクジヨンジューゴフン",
+        ),
+        (
+            "2025年9月24日",
+            "2025年9月24日",
+            "ニセンニジューゴネンクガツニジューヨッカ",
+        ),
+    ],
+)
+def test_g2p_date_and_datetime_keep_expected_readings(
+    text: str,
+    expected_norm_text: str,
+    expected_joined_sep_kata: str,
+) -> None:
+    """年月日と年月日 + 時刻の代表ケースが期待どおりに読まれる。"""
+
+    norm_text, joined_sep_kata = _extract_joined_sep_kata(text)
+    assert norm_text == expected_norm_text
+    assert joined_sep_kata == expected_joined_sep_kata
+
+
+def test_g2p_dates_keep_same_prefix_reading_with_sentence_suffix() -> None:
+    """2025 年の全日付で、年月日の読みが文末でも崩れないことを確認する。"""
+
+    current_date = date(2025, 1, 1)
+    end_date = date(2025, 12, 31)
+    one_day = timedelta(days=1)
+    while current_date <= end_date:
+        base_text = f"{current_date.year}年{current_date.month}月{current_date.day}日"
+        compare_text = f"{base_text}です"
+        _, base_joined_sep_kata = _extract_joined_sep_kata(base_text)
+        _, compare_joined_sep_kata = _extract_joined_sep_kata(compare_text)
+        assert compare_joined_sep_kata.startswith(base_joined_sep_kata), (
+            f"Unexpected date reading prefix. text: {base_text}, "
+            f"base: {base_joined_sep_kata}, compare: {compare_joined_sep_kata}"
+        )
+        current_date += one_day
+
+
+def test_g2p_datetimes_keep_same_prefix_reading_with_sentence_suffix() -> None:
+    """2025 年の全日付で、年月日 + 9時12分 の読みが文末でも崩れないことを確認する。"""
+
+    current_date = date(2025, 1, 1)
+    end_date = date(2025, 12, 31)
+    one_day = timedelta(days=1)
+    while current_date <= end_date:
+        base_text = (
+            f"{current_date.year}年{current_date.month}月{current_date.day}日9時12分"
+        )
+        compare_text = f"{base_text}です"
+        _, base_joined_sep_kata = _extract_joined_sep_kata(base_text)
+        _, compare_joined_sep_kata = _extract_joined_sep_kata(compare_text)
+        assert compare_joined_sep_kata.startswith(base_joined_sep_kata), (
+            f"Unexpected datetime reading prefix. text: {base_text}, "
+            f"base: {base_joined_sep_kata}, compare: {compare_joined_sep_kata}"
+        )
+        current_date += one_day
+
+
+def test_g2p_idiomatic_juunibun_keeps_lexical_reading() -> None:
+    """時刻以外の「十二分」は慣用表現としてジュウニブンを維持する。"""
+
+    norm_text, joined_sep_kata = _extract_joined_sep_kata("もう十二分に満足した")
+    expected_joined_sep_kata = "モージューニブンニマンゾクシタ"
+    assert norm_text == "もう十二分に満足した"
+    assert joined_sep_kata == expected_joined_sep_kata
 
 
 def test_clean_text_with_given_phone_tone_nanairo_keeps_emoji_mora() -> None:
@@ -251,19 +559,6 @@ def test_process_line_nanairo_preserves_emoji_and_standard_ignores_it(
         standard_tones,
         standard_word2ph,
     )
-
-
-def test_g2p_basic_sentence() -> None:
-    """基本的な文でも phones / tones / word2ph の整合性が保たれる。"""
-
-    _, phones, tones, word2ph, _, _, _ = clean_text_with_given_phone_tone(
-        text="今日はいい天気ですね.",
-        language=Languages.JP,
-        use_jp_extra=True,
-        raise_yomi_error=False,
-    )
-
-    _assert_phone_tone_word2ph_consistency(phones, tones, word2ph)
 
 
 def test_g2p_punctuation_marks() -> None:

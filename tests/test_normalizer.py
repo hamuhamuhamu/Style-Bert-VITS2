@@ -653,8 +653,8 @@ def test_normalize_text_dates():
     assert normalize_text("05年には") == "05年には"
     assert normalize_text("85年には") == "85年には"
     assert normalize_text("05年01月には") == "05年1月には"
-    assert normalize_text("09-01-03 24:34") == "2009年1月3日二十四時三十四分"
-    assert normalize_text("87-01-03 24:34") == "1987年1月3日二十四時三十四分"
+    assert normalize_text("09-01-03 24:34") == "2009年1月3日二十四時34分"
+    assert normalize_text("87-01-03 24:34") == "1987年1月3日二十四時34分"
     assert normalize_text("明治45年07月30日") == "明治45年7月30日"
     assert normalize_text("大正15年12月25日") == "大正15年12月25日"
     assert normalize_text("昭和64年01月07日") == "昭和64年1月7日"
@@ -668,64 +668,70 @@ def test_normalize_text_dates():
 def test_normalize_text_time():
     """時刻関連の正規化のテスト"""
     # 基本的な時刻表現
-    assert normalize_text("9時30分") == "九時三十分"
+    assert normalize_text("9時3分") == "九時3分"
+    assert normalize_text("9時4分") == "九時4分"
+    assert normalize_text("9時6分") == "九時6分"
+    assert normalize_text("9時12分") == "九時12分"
+    assert normalize_text("9時22分") == "九時22分"
+    assert normalize_text("9時30分") == "九時30分"
     assert normalize_text("14時00分") == "十四時"
-    assert normalize_text("7時45分30秒") == "七時四十五分三十秒"
+    assert normalize_text("7時45分30秒") == "七時45分三十秒"
     # コロン区切りの時刻
-    assert normalize_text("09:30") == "九時三十分"
+    assert normalize_text("09:12") == "九時12分"
+    assert normalize_text("09:30") == "九時30分"
     assert normalize_text("14:00") == "十四時"
-    assert normalize_text("07:45:30") == "七時四十五分三十秒"
+    assert normalize_text("07:45:30") == "七時45分三十秒"
     # アスペクト比（時刻として解釈されない数値の組み合わせ）
     assert normalize_text("16:9") == "十六タイ九"
     # 午前・午後
-    assert normalize_text("午前9時30分") == "午前九時三十分"
-    assert normalize_text("午後3時45分") == "午後三時四十五分"
+    assert normalize_text("午前9時30分") == "午前九時30分"
+    assert normalize_text("午後3時45分") == "午後三時45分"
     # 特殊な時刻
     assert normalize_text("0時0分") == "零時"
     assert normalize_text("24時00分") == "二十四時"
     assert normalize_text("25:00") == "二十五時"  # 25時までは許容
     assert normalize_text("30:00") == "三十タイ零"  # 30時はアスペクト比として解釈される
     # 秒以下の単位
-    assert normalize_text("10時20分30.5秒") == "十時二十分30.5秒"
+    assert normalize_text("10時20分30.5秒") == "十時20分30.5秒"
     # 異常な時刻
     assert normalize_text("24:60") == "二十四時六十"  # 存在しない分
     assert normalize_text("00:00:60") == "零時零分六十"  # 存在しない秒
     # 27時台までは許容
-    assert normalize_text("27:59:00") == "二十七時五十九分零秒"
+    assert normalize_text("27:59:00") == "二十七時59分零秒"
     assert (
         normalize_text("28:00:00") == "二十八タイ零タイ零"
     )  # 28時はアスペクト比として解釈される
 
     # 追加のテストケース
-    assert normalize_text("03:34に") == "三時三十四分に"
+    assert normalize_text("03:34に") == "三時34分に"
     assert normalize_text("03:3:564に") == "三タイ三タイ五百六十四に"
-    assert normalize_text("03:34:54に") == "三時三十四分五十四秒に"
-    assert normalize_text("03:03:03に") == "三時三分三秒に"
-    assert normalize_text("03:03:62に") == "三時三分六十二に"
-    assert normalize_text("03:03:60に") == "三時三分六十に"
-    assert normalize_text("03:03:59に") == "三時三分五十九秒に"
-    assert normalize_text("03:03:01に") == "三時三分一秒に"
-    assert normalize_text("03:03:5に") == "三時三分五秒に"
-    assert normalize_text("04:03") == "四時三分"
+    assert normalize_text("03:34:54に") == "三時34分五十四秒に"
+    assert normalize_text("03:03:03に") == "三時3分三秒に"
+    assert normalize_text("03:03:62に") == "三時3分六十二に"
+    assert normalize_text("03:03:60に") == "三時3分六十に"
+    assert normalize_text("03:03:59に") == "三時3分五十九秒に"
+    assert normalize_text("03:03:01に") == "三時3分一秒に"
+    assert normalize_text("03:03:5に") == "三時3分五秒に"
+    assert normalize_text("04:03") == "四時3分"
     assert normalize_text("4:3") == "四タイ三"
     assert normalize_text("16:3") == "十六タイ三"
     assert normalize_text("04:3") == "四タイ三"
-    assert normalize_text("4:30") == "四時三十分"
-    assert normalize_text("04:30") == "四時三十分"
-    assert normalize_text("04時30分") == "四時三十分"
-    assert normalize_text("2024年05月08日 03時06分08秒") == "2024年5月8日三時六分八秒"
+    assert normalize_text("4:30") == "四時30分"
+    assert normalize_text("04:30") == "四時30分"
+    assert normalize_text("04時30分") == "四時30分"
+    assert normalize_text("2024年05月08日 03時06分08秒") == "2024年5月8日三時6分八秒"
     assert normalize_text("2024年05月08日 00時00分00秒") == "2024年5月8日零時零分零秒"
     assert normalize_text("2024:05:08 00:00:00") == "二千二十四タイ五タイ八零時零分零秒"
-    assert normalize_text("2024/05/08 00:03:00") == "2024年5月8日零時三分零秒"
-    assert normalize_text("2024/05/08 00:03") == "2024年5月8日零時三分"
+    assert normalize_text("2024/05/08 00:03:00") == "2024年5月8日零時3分零秒"
+    assert normalize_text("2024/05/08 00:03") == "2024年5月8日零時3分"
     assert normalize_text("2024/05/08 00") == "2024年5月8日00"
-    assert normalize_text("2024/05/08 0:30") == "2024年5月8日零時三十分"
+    assert normalize_text("2024/05/08 0:30") == "2024年5月8日零時30分"
     assert normalize_text("2024年05月01日") == "2024年5月1日"
     assert normalize_text("2024/05/01") == "2024年5月1日"
     assert normalize_text("2024年05月01日") == "2024年5月1日"
     assert normalize_text("2024年05月01日 03時00分0秒") == "2024年5月1日三時零分零秒"
     assert normalize_text("2024年05月01日 03時0分0秒") == "2024年5月1日三時零分零秒"
-    assert normalize_text("2024年05月08日 03時06分08秒") == "2024年5月8日三時六分八秒"
+    assert normalize_text("2024年05月08日 03時06分08秒") == "2024年5月8日三時6分八秒"
     assert normalize_text("2024年05月08日 00時00分30秒") == "2024年5月8日零時零分三十秒"
     assert normalize_text("2024年05月08日 00時00分０0秒") == "2024年5月8日零時零分零秒"
     assert normalize_text("2024年05月08日 00時00分00秒") == "2024年5月8日零時零分零秒"
@@ -733,23 +739,23 @@ def test_normalize_text_time():
     assert normalize_text("2024年05月08日 03時00分") == "2024年5月8日三時"
     assert normalize_text("2024年05月08日 03時00分0秒") == "2024年5月8日三時零分零秒"
     assert normalize_text("2024年05月08日 03時00分") == "2024年5月8日三時"
-    assert normalize_text("2024年05月08日 03時01分") == "2024年5月8日三時一分"
-    assert normalize_text("2024年05月08日 03:01") == "2024年5月8日三時一分"
-    assert normalize_text("2024/05/08 03:01") == "2024年5月8日三時一分"
-    assert normalize_text("2024/05/08 03:01:00") == "2024年5月8日三時一分零秒"
-    assert normalize_text("2024/05/08 3時1分00") == "2024年5月8日三時一分00"
-    assert normalize_text("2024/05/08 3時1分0秒") == "2024年5月8日三時一分零秒"
-    assert normalize_text("2024/05/08 3時1分60秒") == "2024年5月8日三時一分六十"
-    assert normalize_text("2024/05/08 3時1分59秒") == "2024年5月8日三時一分五十九秒"
-    assert normalize_text("27:59:00") == "二十七時五十九分零秒"
-    assert normalize_text("27:59") == "二十七時五十九分"
-    assert normalize_text("27:59:00") == "二十七時五十九分零秒"
+    assert normalize_text("2024年05月08日 03時01分") == "2024年5月8日三時1分"
+    assert normalize_text("2024年05月08日 03:01") == "2024年5月8日三時1分"
+    assert normalize_text("2024/05/08 03:01") == "2024年5月8日三時1分"
+    assert normalize_text("2024/05/08 03:01:00") == "2024年5月8日三時1分零秒"
+    assert normalize_text("2024/05/08 3時1分00") == "2024年5月8日三時1分00"
+    assert normalize_text("2024/05/08 3時1分0秒") == "2024年5月8日三時1分零秒"
+    assert normalize_text("2024/05/08 3時1分60秒") == "2024年5月8日三時1分六十"
+    assert normalize_text("2024/05/08 3時1分59秒") == "2024年5月8日三時1分五十九秒"
+    assert normalize_text("27:59:00") == "二十七時59分零秒"
+    assert normalize_text("27:59") == "二十七時59分"
+    assert normalize_text("27:59:00") == "二十七時59分零秒"
     assert normalize_text("28:59:00") == "二十八タイ五十九タイ零"
     assert normalize_text("28:59") == "二十八タイ五十九"
-    assert normalize_text("03:03:03") == "三時三分三秒"
+    assert normalize_text("03:03:03") == "三時3分三秒"
     assert normalize_text("30:1:03") == "三十タイ一タイ三"
     assert normalize_text("30:1:03:5") == "三十タイ一タイ三,5"
-    assert normalize_text("30:1:03:5:07") == "三十タイ一タイ三,五時七分"
+    assert normalize_text("30:1:03:5:07") == "三十タイ一タイ三,五時7分"
     assert normalize_text("1:3:4") == "一タイ三タイ四"
     assert normalize_text("1:3:4:5") == "一タイ三タイ四,5"
     assert normalize_text("1:3:4:5:6") == "一タイ三タイ四,五タイ六"
@@ -758,17 +764,17 @@ def test_normalize_text_time():
     assert normalize_text("16:9") == "十六タイ九"
     assert normalize_text("4:3") == "四タイ三"
     assert normalize_text("3:2") == "三タイ二"
-    assert normalize_text("03:02") == "三時二分"
+    assert normalize_text("03:02") == "三時2分"
     assert normalize_text("03:2") == "三タイ二"
-    assert normalize_text("3:02") == "三時二分"
-    assert normalize_text("03:02") == "三時二分"
+    assert normalize_text("3:02") == "三時2分"
+    assert normalize_text("03:02") == "三時2分"
     assert normalize_text("03:2") == "三タイ二"
-    assert normalize_text("03:02") == "三時二分"
-    assert normalize_text("03:02:00") == "三時二分零秒"
+    assert normalize_text("03:02") == "三時2分"
+    assert normalize_text("03:02:00") == "三時2分零秒"
     assert normalize_text("03:00:00") == "三時零分零秒"
     assert normalize_text("24:00:00") == "二十四時零分零秒"
     assert normalize_text("24:00") == "二十四時"
-    assert normalize_text("27:59:00") == "二十七時五十九分零秒"
+    assert normalize_text("27:59:00") == "二十七時59分零秒"
     assert normalize_text("00:00:00.123") == "零時零分零秒.123"
     assert normalize_text("12:00 PM") == "十二時ピーエム"
     assert normalize_text("12:00 AM") == "十二時エーエム"
@@ -2866,7 +2872,7 @@ def test_normalize_text_complex():
     # 日付・時刻・単位を含む文
     assert (
         normalize_text("2024/01/01(月)の14時30分に1.5kgの荷物を受け取った。")
-        == "2024年1月1日月曜日の十四時三十分に1.5キログラムの荷物を受け取った."
+        == "2024年1月1日月曜日の十四時30分に1.5キログラムの荷物を受け取った."
     )
     assert (
         normalize_text("MacBookで1080p/60fpsの動画を2GB保存した。")
@@ -2884,7 +2890,7 @@ def test_normalize_text_complex():
     )
     assert (
         normalize_text("09:30に家を出発し、2km先のスーパーで500gのお肉を買った。")
-        == "九時三十分に家を出発し,2キロメートル先のスーパーで500グラムのお肉を買った."
+        == "九時30分に家を出発し,2キロメートル先のスーパーで500グラムのお肉を買った."
     )
     assert (
         normalize_text(
@@ -2971,7 +2977,7 @@ def test_normalize_text_complex():
     [
         (
             "2025/04/01(火)18:45開始、会場はB2F、入場料は¥2,480です。",
-            "2025年4月1日火曜日十八時四十五分開始,会場は地下2階,入場料は2480円です.",
+            "2025年4月1日火曜日十八時45分開始,会場は地下2階,入場料は2480円です.",
         ),
         (
             "速報: CPU使用率99%・温度78℃・消費電力120Wでも、Server-Xは24時間連続稼働した。",
@@ -2991,11 +2997,11 @@ def test_normalize_text_complex():
         ),
         (
             "東京都千代田区1-2-3 8Fで、2024年12月31日(火)23:59にカウントダウン配信を行う。",
-            "東京都千代田区1の2の3'8階で,2024年12月31日火曜日二十三時五十九分にカウントダウン配信を行う.",
+            "東京都千代田区1の2の3'8階で,2024年12月31日火曜日二十三時59分にカウントダウン配信を行う.",
         ),
         (
             "受付番号No.A-102をお持ちの方は、14:05までに3番窓口へお越しください。",
-            "受付番号ノーA102をお持ちの方は,十四時五分までに3番窓口へお越しください.",
+            "受付番号ノーA102をお持ちの方は,十四時5分までに3番窓口へお越しください.",
         ),
         (
             "β版アプリはiOS 18.1 / Android 16 / Windows 11に対応予定です。",
@@ -3015,7 +3021,7 @@ def test_normalize_text_complex():
         ),
         (
             "CEO登壇は17:30、配信URLはhttps://live.example.com/2026/keynote?lang=jaです。",
-            "シーイーオー登壇は十七時三十分,配信ユーアールエルはエイチティーティーピーエス,ライブドット,イグザンプルドットコム,スラッシュ,2026,スラッシュ,キーノート,クエスチョン,ラングイコールジャです.",
+            "シーイーオー登壇は十七時30分,配信ユーアールエルはエイチティーティーピーエス,ライブドット,イグザンプルドットコム,スラッシュ,2026,スラッシュ,キーノート,クエスチョン,ラングイコールジャです.",
         ),
         (
             "R6.4.1時点で累計導入社数は321社、継続率は99.1%です。",
@@ -3047,7 +3053,7 @@ def test_normalize_text_complex():
         ),
         (
             "メール件名に【至急】と入れ、dev-team@example.comへ20:30までに返信してください。",
-            "メール件名に'至急'と入れ,デブハイフンチーム,アットマーク,イグザンプルドットコムへ二十時三十分までに返信してください.",
+            "メール件名に'至急'と入れ,デブハイフンチーム,アットマーク,イグザンプルドットコムへ二十時30分までに返信してください.",
         ),
         (
             "冷蔵庫は幅68cm×奥行63cm×高さ185cm、年間消費電力量は302kWh。",
@@ -3059,7 +3065,7 @@ def test_normalize_text_complex():
         ),
         (
             "2025/7/5(土) 7:05発の便で出発し、現地時間13:20に到着予定。",
-            "2025年7月5日土曜日七時五分発の便で出発し,現地時間十三時二十分に到着予定.",
+            "2025年7月5日土曜日七時5分発の便で出発し,現地時間十三時20分に到着予定.",
         ),
         (
             "サーバー負荷が70%を超えたら自動でscale-outし、90%以上ならアラートを送信。",
@@ -3079,7 +3085,7 @@ def test_normalize_text_complex():
         ),
         (
             "受付は午前8時30分から、最終入場は18:15、駐車場は第2-第4区画を利用してください。",
-            "受付は午前八時三十分から,最終入場は十八時十五分,駐車場は第2第4区画を利用してください.",
+            "受付は午前八時30分から,最終入場は十八時15分,駐車場は第2第4区画を利用してください.",
         ),
         (
             "創業以来、累計5,000万DL、月間アクティブユーザーは320万人を突破。",
@@ -3107,7 +3113,7 @@ def test_normalize_text_complex():
         ),
         (
             "視聴者プレゼントはA賞1名、B賞3名、C賞10名で、応募締切は23:59です。",
-            "視聴者プレゼントはA賞1名,B賞3名,C賞10名で,応募締切は二十三時五十九分です.",
+            "視聴者プレゼントはA賞1名,B賞3名,C賞10名で,応募締切は二十三時59分です.",
         ),
         (
             "〒150-0001 東京都渋谷区神宮前1-2-3のポップアップ会場は、03-1234-5678でお問い合わせを受け付けています。",
@@ -3175,7 +3181,7 @@ def test_normalize_text_complex():
         ),
         (
             "製品交換の送り先は〒263-0023 千葉県千葉市稲毛区緑町1-16-12、受付時間は9:30-17:00、電話は043-245-6789です。",
-            "製品交換の送り先は郵便番号ニーロクサンのゼロゼロニーサン,千葉県千葉市稲毛区緑町1の16の12,受付時間は九時三十分十七時,電話はゼロヨンサン,ニーヨンゴ,ロクナナハチキューです.",
+            "製品交換の送り先は郵便番号ニーロクサンのゼロゼロニーサン,千葉県千葉市稲毛区緑町1の16の12,受付時間は九時30分十七時,電話はゼロヨンサン,ニーヨンゴ,ロクナナハチキューです.",
         ),
         (
             "イベント当日は〒371-0024 群馬県前橋市表町2-30-8 AQERU前橋6Fに集合し、遅刻時は027-220-5500へご連絡ください。",
