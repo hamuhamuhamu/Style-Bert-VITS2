@@ -326,7 +326,11 @@ def run():
         train_sampler = DistributedBucketSampler(
             train_dataset,
             hps.train.batch_size,
-            [32, 300, 400, 500, 600, 700, 800, 900, 1000],
+            # バケット境界（スペクトログラムのフレーム数単位）
+            # 44100Hz / hop_length=512 の場合: 1 frame ≈ 0.0116 秒
+            # 上限 1724 frames ≈ 20.01 秒（20 秒の音声を確実にカバーするため 1724 に設定）
+            # 1000 frames 以降は長尺音声の絶対数が少ないため 200 frames 刻み (≈2.3 秒) に拡大
+            [32, 300, 400, 500, 600, 700, 800, 900, 1000, 1200, 1400, 1600, 1724],
             num_replicas=n_gpus,
             rank=rank,
             shuffle=True,
