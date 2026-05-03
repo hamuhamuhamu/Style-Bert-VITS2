@@ -3,6 +3,7 @@ from typing import Any, cast
 
 from style_bert_vits2.logging import logger
 from style_bert_vits2.nlp.japanese.pyopenjtalk_worker.worker_common import (
+    WORKER_HOST,
     RequestType,
     receive_data,
     send_data,
@@ -16,7 +17,7 @@ class WorkerClient:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         # timeout: 60 seconds
         sock.settimeout(60)
-        sock.connect((socket.gethostname(), port))
+        sock.connect((WORKER_HOST, port))
         self.sock = sock
 
     def __enter__(self) -> "WorkerClient":

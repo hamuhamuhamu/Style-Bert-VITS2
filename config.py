@@ -9,13 +9,20 @@ from typing import Any
 import torch
 import yaml
 
+from style_bert_vits2.constants import BASE_DIR
 from style_bert_vits2.logging import logger
 
 
 class PathConfig:
     def __init__(self, dataset_root: str, assets_root: str):
-        self.dataset_root = Path(dataset_root)
-        self.assets_root = Path(assets_root)
+        dataset_root_path = Path(dataset_root)
+        assets_root_path = Path(assets_root)
+        if not dataset_root_path.is_absolute():
+            dataset_root_path = BASE_DIR / dataset_root_path
+        if not assets_root_path.is_absolute():
+            assets_root_path = BASE_DIR / assets_root_path
+        self.dataset_root = dataset_root_path
+        self.assets_root = assets_root_path
 
 
 # If not cuda available, set possible devices to cpu
@@ -228,8 +235,12 @@ class Translate_config:
 
 class Config:
     def __init__(self, config_path: str, path_config: PathConfig):
-        if not Path(config_path).exists():
-            shutil.copy(src="default_config.yml", dst=config_path)
+        config_path = Path(config_path)
+        if not config_path.is_absolute():
+            config_path = BASE_DIR / config_path
+        default_config_path = BASE_DIR / "default_config.yml"
+        if not config_path.exists():
+            shutil.copy(src=default_config_path, dst=config_path)
             logger.info(
                 f"A configuration file {config_path} has been generated based on the default configuration file default_config.yml."
             )
@@ -281,9 +292,10 @@ class Config:
 
 
 def get_path_config() -> PathConfig:
-    path_config_path = Path("configs/paths.yml")
+    path_config_path = BASE_DIR / "configs" / "paths.yml"
+    default_path_config_path = BASE_DIR / "configs" / "default_paths.yml"
     if not path_config_path.exists():
-        shutil.copy(src="configs/default_paths.yml", dst=path_config_path)
+        shutil.copy(src=default_path_config_path, dst=path_config_path)
         logger.info(
             f"A configuration file {path_config_path} has been generated based on the default configuration file default_paths.yml."
         )
@@ -301,7 +313,7 @@ def get_config() -> Config:
         config = Config("config.yml", path_config)
     except (TypeError, KeyError):
         logger.warning("Old config.yml found. Replace it with default_config.yml.")
-        shutil.copy(src="default_config.yml", dst="config.yml")
+        shutil.copy(src=BASE_DIR / "default_config.yml", dst=BASE_DIR / "config.yml")
         config = Config("config.yml", path_config)
 
     return config

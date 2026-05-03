@@ -6,6 +6,7 @@ from typing import Any, Final
 
 WORKER_PORT: Final[int] = 7861
 HEADER_SIZE: Final[int] = 4
+WORKER_HOST: Final[str] = "127.0.0.1"
 
 
 class RequestType(IntEnum):

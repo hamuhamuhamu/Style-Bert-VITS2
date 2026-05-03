@@ -89,25 +89,30 @@ def initialize_worker(port: int = WORKER_PORT) -> None:
         client = WorkerClient(port)
     except (TimeoutError, OSError):
         logger.debug("try starting pyopenjtalk worker server")
-        import os
+        from pathlib import Path
         import subprocess
 
-        worker_pkg_path = os.path.relpath(
-            os.path.dirname(__file__), os.getcwd()
-        ).replace(os.sep, ".")
-        args = [sys.executable, "-m", worker_pkg_path, "--port", str(port)]
+        worker_module = "style_bert_vits2.nlp.japanese.pyopenjtalk_worker"
+        args = [sys.executable, "-m", worker_module, "--port", str(port)]
+        project_root = Path(__file__).resolve().parents[4]
         # new session, new process group
         if sys.platform.startswith("win"):
             cf = subprocess.CREATE_NEW_CONSOLE | subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore
             si = subprocess.STARTUPINFO()  # type: ignore
             si.dwFlags |= subprocess.STARTF_USESHOWWINDOW  # type: ignore
             si.wShowWindow = subprocess.SW_HIDE  # type: ignore
-            subprocess.Popen(args, creationflags=cf, startupinfo=si)
+            subprocess.Popen(
+                args,
+                creationflags=cf,
+                startupinfo=si,
+                cwd=project_root,
+            )
         else:
             # align with Windows behavior
             # start_new_session is same as specifying setsid in preexec_fn
             subprocess.Popen(
                 args,
+                cwd=project_root,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 start_new_session=True,
